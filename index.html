@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Play Music</title>
+  <link type="text/css" rel="stylesheet" href="//fonts.googleapis.com/css?family=Roboto:100,100italic,300,300italic,400,400italic,500,500italic,700,700italic,900,900italic&subset=latin,cyrillic-ext,latin-ext,cyrillic&display=swap">
+  <link type="text/css" rel="stylesheet" href="//fonts.googleapis.com/css?family=Roboto+Slab&display=swap">
+  <link type="text/css" rel="stylesheet" href="//fonts.googleapis.com/earlyaccess/notosansjapanese.css">
+  <script type="text/javascript" src="/fe/e3486cb3c56cf87c41dc5bdc41c85649/webcomponents-lite.min.js"></script>
+  <link rel="import" href="/fe/e3486cb3c56cf87c41dc5bdc41c85649/sj_srcs.html">
+  <style is="custom-style" include="sj-shared-styles"></style>
+  <link type="text/css" rel="stylesheet" href="/fe/e3486cb3c56cf87c41dc5bdc41c85649/listenstyles_extended_80d882f312bf67807b5b6042e9718ae316b77d10.css">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: "Roboto", sans-serif;
+    }
+    #continue-screen {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fafafa;
+      z-index: 10;
+    }
+    #continue-card {
+      width: 360px;
+      background: white;
+      padding: 24px;
+      border-radius: 2px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.24), 0 6px 12px rgba(0,0,0,.12);
+    }
+    #continue-title {
+      font-size: 24px;
+      font-weight: 400;
+      color: rgba(0,0,0,.87);
+      margin: 0 0 16px;
+    }
+    #continue-text {
+      font-size: 16px;
+      font-weight: 400;
+      color: rgba(0,0,0,.54);
+      margin-bottom: 24px;
+    }
+    #continue-button {
+      color: #4285f4;
+      font-weight: 500;
+      float: right;
+    }
+    #loading-progress {
+      position: fixed;
+      left: 0;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: white;
+      z-index: 9999;
+      text-align: center;
+    }
+    #loading-progress-content {
+      width: 320px;
+    }
+  </style>
+</head>
+<body>
+  <paper-header-panel mode="waterfall">
+    <paper-toolbar id="material-app-bar">
+      <div class="top material-one-google">
+        <div id="material-one-left">
+          <paper-icon-button icon="menu" aria-label="Open the navigation drawer."></paper-icon-button>
+          <div class="music-logo"></div>
+        </div>
+        <div id="material-one-middle"></div>
+        <div id="material-one-right"></div>
+      </div>
+    </paper-toolbar>
+    <div id="music-content" class="material" role="main">
+      <div id="app-bar-text-protection"></div>
+      <iron-image id="material-hero-image" preload="true" fade="true" sizing="cover" position="top"></iron-image>
+    </div>
+  </paper-header-panel>
+  <div id="loading-progress">
+    <div id="loading-progress-content">
+      <div id="loading-logo"></div>
+      <paper-progress id="loading-progress-bar" class="transiting"></paper-progress>
+      <div id="loading-progress-message">Loading Music Library&hellip;</div>
+    </div>
+  </div>
+  <script>
+var k="function"==typeof Object.defineProperties?Object.defineProperty:function(a,c,f){a!=Array.prototype&&a!=Object.prototype&&(a[c]=f.value)},l="undefined"!=typeof window&&window===this?this:"undefined"!=typeof global&&null!=global?global:this;function m(){m=function(){};l.Symbol||(l.Symbol=n)}var n=function(){var a=0;return function(c){return"jscomp_symbol_"+(c||"")+a++}}();
+function p(){m();var a=l.Symbol.iterator;a||(a=l.Symbol.iterator=l.Symbol("iterator"));"function"!=typeof Array.prototype[a]&&k(Array.prototype,a,{configurable:!0,writable:!0,value:function(){return q(this)}});p=function(){}}function q(a){var c=0;return r(function(){return c<a.length?{done:!1,value:a[c++]}:{done:!0}})}function r(a){p();a={next:a};a[l.Symbol.iterator]=function(){return this};return a}function t(a){p();var c=a[Symbol.iterator];return c?c.call(a):q(a)}
+for(var u=l,v=["Promise"],w=0;w<v.length-1;w++){var x=v[w];x in u||(u[x]={});u=u[x]}
+var y=v[v.length-1],A=u[y],B=function(){function a(b){this.b=0;this.g=void 0;this.a=[];var a=this.c();try{b(a.resolve,a.reject)}catch(e){a.reject(e)}}function c(){this.a=null}function f(b){return b instanceof a?b:new a(function(a){a(b)})}if(A)return A;c.prototype.b=function(b){null==this.a&&(this.a=[],this.f());this.a.push(b)};c.prototype.f=function(){var b=this;this.c(function(){b.i()})};var h=l.setTimeout;c.prototype.c=function(b){h(b,0)};c.prototype.i=function(){for(;this.a&&this.a.length;){var b=
+this.a;this.a=[];for(var a=0;a<b.length;++a){var e=b[a];delete b[a];try{e()}catch(g){this.g(g)}}}this.a=null};c.prototype.g=function(a){this.c(function(){throw a;})};a.prototype.c=function(){function a(a){return function(b){e||(e=!0,a.call(d,b))}}var d=this,e=!1;return{resolve:a(this.o),reject:a(this.f)}};a.prototype.o=function(b){if(b===this)this.f(new TypeError("A Promise cannot resolve to itself"));else if(b instanceof a)this.s(b);else{a:switch(typeof b){case "object":var d=null!=b;break a;case "function":d=
+!0;break a;default:d=!1}d?this.m(b):this.i(b)}};a.prototype.m=function(a){var b=void 0;try{b=a.then}catch(e){this.f(e);return}"function"==typeof b?this.u(b,a):this.i(a)};a.prototype.f=function(a){this.j(2,a)};a.prototype.i=function(a){this.j(1,a)};a.prototype.j=function(a,d){if(0!=this.b)throw Error("Cannot settle("+a+", "+d|"): Promise already settled in state"+this.b);this.b=a;this.g=d;this.l()};a.prototype.l=function(){if(null!=this.a){for(var a=this.a,d=0;d<a.length;++d)a[d].call(),a[d]=null;
+this.a=null}};var z=new c;a.prototype.s=function(a){var b=this.c();a.h(b.resolve,b.reject)};a.prototype.u=function(a,d){var b=this.c();try{a.call(d,b.resolve,b.reject)}catch(g){b.reject(g)}};a.prototype.then=function(b,d){function c(a,b){return"function"==typeof a?function(b){try{g(a(b))}catch(C){f(C)}}:b}var g,f,h=new a(function(a,b){g=a;f=b});this.h(c(b,g),c(d,f));return h};a.prototype.catch=function(a){return this.then(void 0,a)};a.prototype.h=function(a,c){function b(){switch(d.b){case 1:a(d.g);
+break;case 2:c(d.g);break;default:throw Error("Unexpected state: "+d.b);}}var d=this;null==this.a?z.b(b):this.a.push(function(){z.b(b)})};a.resolve=f;a.reject=function(b){return new a(function(a,c){c(b)})};a.race=function(b){return new a(function(a,c){for(var d=t(b),e=d.next();!e.done;e=d.next())f(e.value).h(a,c)})};a.all=function(b){var c=t(b),e=c.next();return e.done?f([]):new a(function(a,b){function d(b){return function(c){g[b]=c;h--;0==h&&a(g)}}var g=[],h=0;do g.push(void 0),h++,f(e.value).h(d(g.length-
+1),b),e=c.next();while(!e.done)})};return a}();B!=A&&null!=B&&k(u,y,{configurable:!0,writable:!0,value:B});function D(){return new Promise(function(a){var c=document.getElementById("loading-progress-bar"),f=0,h=setInterval(function(){f++;c&&(c.value=f);100<=f&&(clearInterval(h),a())},30)})}
+function E(){var a=document.getElementById("music-content"),c=document.createElement("div");c.id="continue-screen";c.innerHTML='<paper-card id="continue-card"><h1 id="continue-title">Google Play Music</h1><div id="continue-text">Click "continue" to enter GPM</div><paper-button id="continue-button">Continue</paper-button></paper-card>';a.appendChild(c);document.getElementById("continue-button").addEventListener("click",function(){location.href="/music/listen.html#/wst/situations/Lxsecc5ufgz6itixtp7ftqoxete"})}
+window.addEventListener("WebComponentsReady",function(){setTimeout(function(){D().then(function(){document.getElementById("loading-progress").style.display="none";E()})},3E3)});
+
+  </script>
+</body>
+</html>
