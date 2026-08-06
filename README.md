@@ -1,2 +1,2 @@
 # gpm-revival-
-Revivals GPM Web &amp; App
+Revives GPM Web &amp; App
