@@ -2,5 +2,5 @@
 Revives GPM Web &amp; App
 
 # Features that work
-Top charts
-Music Playback
+- Top charts
+- Music Playback
