@@ -5,3 +5,4 @@ Revives GPM Web &amp; App
 - Top charts
 - Browse Podcasts
 - Recent Activity (static data)
+- Settings
