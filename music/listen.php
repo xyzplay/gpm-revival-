@@ -2,6 +2,40 @@
 <html lang="en-US">
 
 <head>
+<script>
+(function(){
+    // Intercept fetch/XHR to /log and /services endpoints
+    const origFetch = window.fetch;
+    window.fetch = function(url, opts){
+        console.log("GPM fetch:", url, opts);
+        return origFetch.apply(this, arguments);
+    };
+
+    const origXHROpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, async){
+        this.addEventListener('load', function(){
+            console.log("XHR loaded:", url, this.status, this.response);
+        });
+        console.log("XHR open:", method, url);
+        return origXHROpen.apply(this, arguments);
+    };
+})();
+</script>
+<script>
+window.onerror = (msg, src, line, col, err) => {
+  const log = document.createElement('div');
+  log.innerText = "JS ERROR: " + msg + " @ " + line + ":" + col;
+  log.style.position = 'fixed';
+  log.style.bottom = '0';
+  log.style.left = '0';
+  log.style.background = 'red';
+  log.style.color = 'white';
+  log.style.padding = '10px';
+  log.style.zIndex = '999999';
+  document.body.appendChild(log);
+};
+</script>
+
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta http-equiv="content-type" content="text/html; charset=UTF-8">
   <meta name="google-site-verification" content="DurDLKfokvWz3G88a8QSeVnoObqnCJTjlOj7Zad-oSg" />
@@ -9853,7 +9887,12 @@
             </div>
             <div alt="Google Play Music logo" class="music-logo" style="display: none"></div>
           </div>
-          <div id="material-one-middle"></div>
+          <div id="material-one-middle">
+            <sj-search-box
+            placeholder="Search music"
+            clear-search-label="Clear search"></sj-search-box>
+            <div id="material-search"></div>
+          </div>
           <div id="material-one-right"><paper-button id="action-bar-no-thanks-button" raised>No thanks</paper-button><paper-button id="action-bar-signup-button" raised class="material-primary">Get started</paper-button>
             <div id=gb class=gb_qf>
               <div ng-non-bindable="" class="gb_db gb_tf gb_R gb_sf gb_X">
@@ -10038,7 +10077,7 @@
         ["Subscribe to get millions of songs on-demand, offline, and ad-free", null, "SUBSCRIBE"],    
         ["Replay that song and millions of others, anytime", null, "SUBSCRIBE"]    
       ],    
-      [0], 0, "http://web.archive.org/web/20200712182902/https://accounts.google.com/ServiceLogin?service\u003dsj\u0026continue\u003dhttps://play.google.com/music/listen", 0, 0, null, null, 0, 0, [0], 0, [], null, 0, 0, [1, 1, 2], "cfffmmgbohdgchiabgakkmkkelofdkgd", 1, "US", 0, null, "en-US", [], 1, 1, [], 0, 0, 1, null, 0, 1, 0, 0, 1, 0, 0, null, 1, 1, "Improve your recommendations", null, 0, "50,000", "Google Play Music Free", [], 0, "40 million"    
+      [0], 0, "http://web.archive.org/web/20200712182902/https://accounts.google.com/ServiceLogin?service\u003dsj\u0026continue\u003dhttps://play.google.com/music/listen", 1, 0, null, null, 0, 0, [0], 0, [], null, 0, 0, [1, 1, 2], "cfffmmgbohdgchiabgakkmkkelofdkgd", 1, "US", 0, null, "en-US", [], 1, 1, [], 0, 0, 1, null, 0, 1, 0, 0, 1, 0, 0, null, 1, 1, "Improve your recommendations", null, 0, "50,000", "Google Play Music Free", [], 0, "40 million"    
     ];    
     window['initialPreferences'] = null;
     window['ACTIVE_FEATURES'] = [8010, 8167, 8192, 8358, 8441, 8063, 8694, 8306, 8473, 8174, 8311, 8170, 8679, 8343, 8618, 8125, 8182, 8024, 8214, 8162, 8226, 8210, 8017, 8685, 8342, 8344, 8366, 8546, 8305, 12600153, 8553, 8123, 8333, 8337, 8797, 8261, 8196, 12600363, 8108, 8127, 8066, 8443, 8255, 8375, 8057, 8397, 12600361, 8037, 8435, 8552, 8283, 8257, 8272, 8045, 8649, 8583, 8247, 8317, 8442, 8061, 8205, 8231, 8806, 8364, 8098, 8329, 8158, 8284, 8677, 8281, 8393, 8823, 12600357, 8282, 8335, 8067, 8302, 8368, 8336, 8808, 8130, 8812, 8504, 8307, 8277, 12600312, 8058, 8469, 8265, 8633, 8418, 8133, 8437, 8538, 8027, 8219, 8036, 12600174, 8049, 8788, 8114, 8359, 8155, 8194, 8450, 8352, 8586, 8099, 8298, 8076, 8570, 8327, 8220, 8152, 8355, 8227, 8147, 8617, 8016, 8252, 8414, 8084, 8533, 8294, 8518, 8288, 8380];
