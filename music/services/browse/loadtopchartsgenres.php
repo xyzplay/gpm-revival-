@@ -1,5 +1,27 @@
 <?php
 // top chart genres
-$topChartGenres=[[0,2,2,0],[[[["pop","Pop"],["hip_hop","Hip-Hop"],["rap","Rap"],["rnb","R&B"],["soul","Soul"],["funk","Funk"],["jazz","Jazz"],["blues","Blues"],["country","Country"],["folk","Folk"],["classical","Classical"],["electronic","Electronic"],["edm","EDM"],["house","House"],["techno","Techno"],["trance","Trance"],["dubstep","Dubstep"],["metal","Metal"],["heavy_metal","Heavy Metal"],["punk","Punk"],["indie","Indie"],["alternative","Alternative"],["grunge","Grunge"],["reggae","Reggae"],["ska","Ska"],["latin","Latin"],["salsa","Salsa"],["reggaeton","Reggaeton"],["kpop","K-Pop"],["jpop","J-Pop"],["soundtrack","Soundtrack"],["gospel","Gospel"],["christian","Christian"],["new_age","New Age"],["ambient","Ambient"],["lofi","Lo-Fi"],["bluegrass","Bluegrass"],["opera","Opera"],["world","World Music"]]]]];
+$topChartGenres = [
+  [0, 2, 2, 0],
+  [
+    [
+      ["1", "Alternative/Indie"],
+      ["2", "Children's Music"],
+      ["3", "Christian/Gospel"],
+      ["4", "Classical"],
+      ["5", "Country"],
+      ["6", "Dance/Electronic"],
+      ["7", "Hip Hop/Rap"],
+      ["8", "Jazz"],
+      ["9", "Latin"],
+      ["10", "Metal"],
+      ["11", "Pop"],
+      ["12", "Rock"],
+      ["13", "R&B"],
+      ["14", "Soundtracks"],
+      ["15", "Vocal/Easy listening"],
+      ["16", "World"]
+    ]
+  ]
+];
 header("Content-Type: application/json");
 echo json_encode($topChartGenres);
