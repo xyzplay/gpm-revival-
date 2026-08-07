@@ -688,7 +688,7 @@ default:
 return value != null ? value : undefined;
 }
 }
-});Polymer.version = "1.6.1";Polymer.Base._addFeature({
+});Polymer.version = "1.7.0";Polymer.Base._addFeature({
 _registerFeatures: function () {
 this._prepIs();
 this._prepBehaviors();
@@ -2961,6 +2961,9 @@ var next = node.nextSibling;
 if (node.localName === 'template' && !node.hasAttribute('preserve-content')) {
 this._parseTemplate(node, i, list, annote);
 }
+if (node.localName == 'slot') {
+node = this._replaceSlotWithContent(node);
+}
 if (node.nodeType === Node.TEXT_NODE) {
 var n = next;
 while (n && n.nodeType === Node.TEXT_NODE) {
@@ -2985,6 +2988,22 @@ node = next;
 i++;
 }
 }
+},
+_replaceSlotWithContent: function (slot) {
+var content = slot.ownerDocument.createElement('content');
+while (slot.firstChild) {
+content.appendChild(slot.firstChild);
+}
+var attrs = slot.attributes;
+for (var i = 0; i < attrs.length; i++) {
+var attr = attrs[i];
+content.setAttribute(attr.name, attr.value);
+}
+var name = slot.getAttribute('name');
+var select = name ? '[slot=\'' + name + '\']' : ':not([slot])';
+content.setAttribute('select', select);
+slot.parentNode.replaceChild(content, slot);
+return content;
 },
 _parseTemplate: function (node, index, list, parent) {
 var content = document.createDocumentFragment();
@@ -3119,7 +3138,30 @@ resolveCss: resolveCss,
 resolveAttrs: resolveAttrs,
 resolveUrl: resolveUrl
 };
-}());Polymer.Base._addFeature({
+}());Polymer.Path = {
+root: function (path) {
+var dotIndex = path.indexOf('.');
+if (dotIndex === -1) {
+return path;
+}
+return path.slice(0, dotIndex);
+},
+isDeep: function (path) {
+return path.indexOf('.') !== -1;
+},
+isAncestor: function (base, path) {
+return base.indexOf(path + '.') === 0;
+},
+isDescendant: function (base, path) {
+return path.indexOf(base + '.') === 0;
+},
+translate: function (base, newBase, path) {
+return newBase + path.slice(base.length);
+},
+matches: function (base, wildcard, path) {
+return base === path || this.isAncestor(base, path) || Boolean(wildcard) && this.isDescendant(base, path);
+}
+};Polymer.Base._addFeature({
 _prepAnnotations: function () {
 if (!this._template) {
 this._notes = [];
@@ -3149,7 +3191,7 @@ var signature = this._parseMethod(p.value);
 if (signature) {
 p.signature = signature;
 } else {
-p.model = this._modelForPath(p.value);
+p.model = Polymer.Path.root(p.value);
 }
 }
 }
@@ -3412,8 +3454,9 @@ mouseEvent.stopPropagation();
 }
 };
 function setupTeardownMouseCanceller(setup) {
-for (var i = 0, en; i < MOUSE_EVENTS.length; i++) {
-en = MOUSE_EVENTS[i];
+var events = IS_TOUCH_ONLY ? ['click'] : MOUSE_EVENTS;
+for (var i = 0, en; i < events.length; i++) {
+en = events[i];
 if (setup) {
 document.addEventListener(en, mouseCanceller, true);
 } else {
@@ -3422,9 +3465,6 @@ document.removeEventListener(en, mouseCanceller, true);
 }
 }
 function ignoreMouse() {
-if (IS_TOUCH_ONLY) {
-return;
-}
 if (!POINTERSTATE.mouse.mouseIgnoreJob) {
 setupTeardownMouseCanceller(true);
 }
@@ -3617,7 +3657,7 @@ node[GESTURE_KEY] = gobj = {};
 }
 for (var i = 0, dep, gd; i < deps.length; i++) {
 dep = deps[i];
-if (IS_TOUCH_ONLY && MOUSE_EVENTS.indexOf(dep) > -1) {
+if (IS_TOUCH_ONLY && MOUSE_EVENTS.indexOf(dep) > -1 && dep !== 'click') {
 continue;
 }
 gd = gobj[dep];
@@ -4276,7 +4316,7 @@ fx.fn.call(this, property, this[property], fx.effect, old, fromAbove);
 },
 _clearPath: function (path) {
 for (var prop in this.__data__) {
-if (prop.indexOf(path + '.') === 0) {
+if (Polymer.Path.isDescendant(path, prop)) {
 this.__data__[prop] = undefined;
 }
 }
@@ -4353,7 +4393,7 @@ _addAnnotatedListener: function (model, index, property, path, event, negated) {
 if (!model._bindListeners) {
 model._bindListeners = [];
 }
-var fn = this._notedListenerFactory(property, path, this._isStructured(path), negated);
+var fn = this._notedListenerFactory(property, path, Polymer.Path.isDeep(path), negated);
 var eventName = event || Polymer.CaseMap.camelToDashCase(property) + '-changed';
 model._bindListeners.push({
 index: index,
@@ -4363,16 +4403,14 @@ changedFn: fn,
 event: eventName
 });
 },
-_isStructured: function (path) {
-return path.indexOf('.') > 0;
-},
 _isEventBogus: function (e, target) {
 return e.path && e.path[0] !== target;
 },
 _notedListenerFactory: function (property, path, isStructured, negated) {
 return function (target, value, targetPath) {
 if (targetPath) {
-this._notifyPath(this._fixPath(path, property, targetPath), value);
+var newPath = Polymer.Path.translate(property, path, targetPath);
+this._notifyPath(newPath, value);
 } else {
 value = target[property];
 if (negated) {
@@ -4494,7 +4532,7 @@ if (bailoutEarly && v === undefined) {
 return;
 }
 if (arg.wildcard) {
-var matches = path.indexOf(name + '.') === 0;
+var matches = Polymer.Path.isAncestor(path, name);
 values[i] = {
 path: matches ? path : name,
 value: matches ? value : v,
@@ -4721,8 +4759,8 @@ a.literal = true;
 break;
 }
 if (!a.literal) {
-a.model = this._modelForPath(arg);
-a.structured = arg.indexOf('.') > 0;
+a.model = Polymer.Path.root(arg);
+a.structured = Polymer.Path.isDeep(arg);
 if (a.structured) {
 a.wildcard = arg.slice(-2) == '.*';
 if (a.wildcard) {
@@ -4912,6 +4950,7 @@ this._handlers = [];
 });
 }());(function () {
 'use strict';
+var Path = Polymer.Path;
 Polymer.Base._addFeature({
 notifyPath: function (path, value, fromAbove) {
 var info = {};
@@ -5019,7 +5058,7 @@ info.path = parts.join('.');
 return prop;
 },
 _pathEffector: function (path, value) {
-var model = this._modelForPath(path);
+var model = Path.root(path);
 var fx$ = this._propertyEffects && this._propertyEffects[model];
 if (fx$) {
 for (var i = 0, fx; i < fx$.length && (fx = fx$[i]); i++) {
@@ -5034,34 +5073,30 @@ this._notifyBoundPaths(path, value);
 }
 },
 _annotationPathEffect: function (path, value, effect) {
-if (effect.value === path || effect.value.indexOf(path + '.') === 0) {
+if (Path.matches(effect.value, false, path)) {
 Polymer.Bind._annotationEffect.call(this, path, value, effect);
-} else if (path.indexOf(effect.value + '.') === 0 && !effect.negate) {
+} else if (!effect.negate && Path.isDescendant(effect.value, path)) {
 var node = this._nodes[effect.index];
 if (node && node._notifyPath) {
-var p = this._fixPath(effect.name, effect.value, path);
-node._notifyPath(p, value, true);
+var newPath = Path.translate(effect.value, effect.name, path);
+node._notifyPath(newPath, value, true);
 }
 }
 },
 _complexObserverPathEffect: function (path, value, effect) {
-if (this._pathMatchesEffect(path, effect)) {
+if (Path.matches(effect.trigger.name, effect.trigger.wildcard, path)) {
 Polymer.Bind._complexObserverEffect.call(this, path, value, effect);
 }
 },
 _computePathEffect: function (path, value, effect) {
-if (this._pathMatchesEffect(path, effect)) {
+if (Path.matches(effect.trigger.name, effect.trigger.wildcard, path)) {
 Polymer.Bind._computeEffect.call(this, path, value, effect);
 }
 },
 _annotatedComputationPathEffect: function (path, value, effect) {
-if (this._pathMatchesEffect(path, effect)) {
+if (Path.matches(effect.trigger.name, effect.trigger.wildcard, path)) {
 Polymer.Bind._annotatedComputationEffect.call(this, path, value, effect);
 }
-},
-_pathMatchesEffect: function (path, effect) {
-var effectArg = effect.trigger.name;
-return effectArg == path || effectArg.indexOf(path + '.') === 0 || effect.trigger.wildcard && path.indexOf(effectArg + '.') === 0;
 },
 linkPaths: function (to, from) {
 this._boundPaths = this._boundPaths || {};
@@ -5079,18 +5114,15 @@ delete this._boundPaths[path];
 _notifyBoundPaths: function (path, value) {
 for (var a in this._boundPaths) {
 var b = this._boundPaths[a];
-if (path.indexOf(a + '.') == 0) {
-this._notifyPath(this._fixPath(b, a, path), value);
-} else if (path.indexOf(b + '.') == 0) {
-this._notifyPath(this._fixPath(a, b, path), value);
+if (Path.isDescendant(a, path)) {
+this._notifyPath(Path.translate(a, b, path), value);
+} else if (Path.isDescendant(b, path)) {
+this._notifyPath(Path.translate(b, a, path), value);
 }
 }
-},
-_fixPath: function (property, root, path) {
-return property + path.slice(root.length);
 },
 _notifyPathUp: function (path, value) {
-var rootName = this._modelForPath(path);
+var rootName = Path.root(path);
 var dashCaseName = Polymer.CaseMap.camelToDashCase(rootName);
 var eventName = dashCaseName + this._EVENT_CHANGED;
 this.fire(eventName, {
@@ -5100,10 +5132,6 @@ value: value
 bubbles: false,
 _useCache: true
 });
-},
-_modelForPath: function (path) {
-var dot = path.indexOf('.');
-return dot < 0 ? path : path.slice(0, dot);
 },
 _EVENT_CHANGED: '-changed',
 notifySplices: function (path, splices) {
@@ -5210,8 +5238,6 @@ _annotationPathEffect: Polymer.Base._annotationPathEffect,
 _complexObserverPathEffect: Polymer.Base._complexObserverPathEffect,
 _annotatedComputationPathEffect: Polymer.Base._annotatedComputationPathEffect,
 _computePathEffect: Polymer.Base._computePathEffect,
-_modelForPath: Polymer.Base._modelForPath,
-_pathMatchesEffect: Polymer.Base._pathMatchesEffect,
 _notifyBoundPaths: Polymer.Base._notifyBoundPaths,
 _getPathParts: Polymer.Base._getPathParts
 });
@@ -5505,7 +5531,9 @@ var e$ = Polymer.TreeApi.arrayCopy(content.querySelectorAll(this.MODULE_STYLES_S
 for (var i = 0, e; i < e$.length; i++) {
 e = e$[i];
 if (e.localName === 'template') {
+if (!e.hasAttribute('preserve-content')) {
 cssText += this.cssFromElement(e);
+}
 } else {
 if (e.localName === 'style') {
 var include = e.getAttribute(this.INCLUDE_ATTR);
@@ -5632,9 +5660,21 @@ elementStyles: function (element, callback) {
 var styles = element._styles;
 var cssText = '';
 var cssBuildType = element.__cssBuild;
+var passthrough = settings.useNativeShadow || cssBuildType === 'shady';
+var cb;
+if (passthrough) {
+var self = this;
+cb = function (rule) {
+rule.selector = self._slottedToContent(rule.selector);
+rule.selector = rule.selector.replace(ROOT, ':host > *');
+if (callback) {
+callback(rule);
+}
+};
+}
 for (var i = 0, l = styles.length, s; i < l && (s = styles[i]); i++) {
 var rules = styleUtil.rulesForStyle(s);
-cssText += settings.useNativeShadow || cssBuildType === 'shady' ? styleUtil.toCssText(rules, callback) : this.css(rules, element.is, element.extends, callback, element._scopeCssViaAttr) + '\n\n';
+cssText += passthrough ? styleUtil.toCssText(rules, cb) : this.css(rules, element.is, element.extends, callback, element._scopeCssViaAttr) + '\n\n';
 }
 return cssText.trim();
 },
@@ -5682,6 +5722,8 @@ var stop = false;
 var hostContext = false;
 var self = this;
 selector = selector.trim();
+selector = this._slottedToContent(selector);
+selector = selector.replace(ROOT, ':host > *');
 selector = selector.replace(CONTENT_START, HOST + ' $1');
 selector = selector.replace(SIMPLE_SELECTOR_SEP, function (m, c, s) {
 if (!stop) {
@@ -5760,12 +5802,13 @@ this._transformRule(rule, this._transformDocumentSelector);
 }
 },
 normalizeRootSelector: function (rule) {
-if (rule.selector === ROOT) {
-rule.selector = 'html';
-}
+rule.selector = rule.selector.replace(ROOT, 'html');
 },
 _transformDocumentSelector: function (selector) {
 return selector.match(SCOPE_JUMP) ? this._transformComplexSelector(selector, SCOPE_DOC_SELECTOR) : this._transformSimpleSelector(selector.trim(), SCOPE_DOC_SELECTOR);
+},
+_slottedToContent: function (cssText) {
+return cssText.replace(SLOTTED_PAREN, CONTENT + '> $1');
 },
 SCOPE_NAME: 'style-scope'
 };
@@ -5788,6 +5831,7 @@ var PSEUDO_PREFIX = ':';
 var CLASS = 'class';
 var CONTENT_START = new RegExp('^(' + CONTENT + ')');
 var SELECTOR_NO_MATCH = 'should_not_match';
+var SLOTTED_PAREN = /(?:::slotted)(?:\(((?:\([^)(]*\)|[^)(]*)+?)\))/g;
 return api;
 }();Polymer.StyleExtends = function () {
 var styleUtil = Polymer.StyleUtil;
@@ -5965,7 +6009,7 @@ prefix = matchText + ';' + prefix;
 return prefix + out.join('; ') + ';';
 }
 function fixVars(matchText, varA, varB) {
-return 'var(' + varA + ',' + 'var(' + varB + '));';
+return 'var(' + varA + ',' + 'var(' + varB + '))';
 }
 function atApplyToCssProperties(mixinName, fallbacks) {
 mixinName = mixinName.replace(APPLY_NAME_CLEAN, '');
@@ -6026,20 +6070,28 @@ _map: mixinMap,
 _separator: MIXIN_VAR_SEP,
 transform: function (styles, elementProto) {
 this.__currentElementProto = elementProto;
-styleUtil.forRulesInStyles(styles, this._boundTransformRule);
+styleUtil.forRulesInStyles(styles, this._boundFindDefinitions);
+styleUtil.forRulesInStyles(styles, this._boundFindApplications);
+if (elementProto) {
 elementProto.__applyShimInvalid = false;
+}
 this.__currentElementProto = null;
 },
-transformRule: function (rule) {
-rule.cssText = this.transformCssText(rule.parsedCssText);
+_findDefinitions: function (rule) {
+var cssText = rule.parsedCssText;
+cssText = cssText.replace(BAD_VAR, fixVars);
+cssText = cssText.replace(VAR_ASSIGN, produceCssProperties);
+rule.cssText = cssText;
 if (rule.selector === ':root') {
 rule.selector = ':host > *';
 }
 },
-transformCssText: function (cssText) {
-cssText = cssText.replace(BAD_VAR, fixVars);
-cssText = cssText.replace(VAR_ASSIGN, produceCssProperties);
-return consumeCssProperties(cssText);
+_findApplications: function (rule) {
+rule.cssText = consumeCssProperties(rule.cssText);
+},
+transformRule: function (rule) {
+this._findDefinitions(rule);
+this._findApplications(rule);
 },
 _getInitialValueForProperty: function (property) {
 if (!this._measureElement) {
@@ -6051,6 +6103,8 @@ return window.getComputedStyle(this._measureElement).getPropertyValue(property);
 }
 };
 ApplyShim._boundTransformRule = ApplyShim.transformRule.bind(ApplyShim);
+ApplyShim._boundFindDefinitions = ApplyShim._findDefinitions.bind(ApplyShim);
+ApplyShim._boundFindApplications = ApplyShim._findApplications.bind(ApplyShim);
 return ApplyShim;
 }();(function () {
 var prepElement = Polymer.Base._prepElement;
@@ -6361,6 +6415,10 @@ properties: props,
 key: o
 };
 },
+_rootSelector: /:root|:host\s*>\s*\*/,
+_checkRoot: function (hostScope, selector) {
+return Boolean(selector.match(this._rootSelector)) || hostScope === 'html' && selector.indexOf('html') > -1;
+},
 whenHostOrRootRule: function (scope, rule, style, callback) {
 if (!rule.propertyInfo) {
 self.decorateRule(rule);
@@ -6370,16 +6428,12 @@ return;
 }
 var hostScope = scope.is ? styleTransformer._calcHostScope(scope.is, scope.extends) : 'html';
 var parsedSelector = rule.parsedSelector;
-var isRoot = parsedSelector === ':root';
-var isHost = parsedSelector.indexOf(':host') === 0;
+var isRoot = this._checkRoot(hostScope, parsedSelector);
+var isHost = !isRoot && parsedSelector.indexOf(':host') === 0;
 var cssBuild = scope.__cssBuild || style.__cssBuild;
 if (cssBuild === 'shady') {
-isRoot = parsedSelector === hostScope + ' > *.' + hostScope || parsedSelector.indexOf('html') !== -1;
+isRoot = parsedSelector === hostScope + ' > *.' + hostScope || parsedSelector.indexOf('html') > -1;
 isHost = !isRoot && parsedSelector.indexOf(hostScope) === 0;
-}
-if (cssBuild === 'shadow') {
-isRoot = parsedSelector === ':host > *' || parsedSelector === 'html';
-isHost = isHost && !isRoot;
 }
 if (!isRoot && !isHost) {
 return;
@@ -6389,6 +6443,9 @@ if (isHost) {
 if (settings.useNativeShadow && !rule.transformedSelector) {
 rule.transformedSelector = styleTransformer._transformRuleCss(rule, styleTransformer._transformComplexSelector, scope.is, hostScope);
 }
+selectorToMatch = rule.transformedSelector || rule.parsedSelector;
+}
+if (isRoot && hostScope === 'html') {
 selectorToMatch = rule.transformedSelector || rule.parsedSelector;
 }
 callback({
@@ -6495,6 +6552,9 @@ if (cssText) {
 style = styleUtil.applyCss(cssText, selector, null, element._scopeStyle);
 }
 } else if (!style.parentNode) {
+if (IS_IE && cssText.indexOf('@media') > -1) {
+style.textContent = cssText;
+}
 styleUtil.applyStyle(style, null, element._scopeStyle);
 }
 }
@@ -6504,9 +6564,6 @@ if (element._customStyle != style) {
 style._useCount++;
 }
 element._customStyle = style;
-}
-if (IS_IE) {
-style.textContent = style.textContent;
 }
 return style;
 },
@@ -6950,10 +7007,10 @@ var styleRules = styleUtil.rulesForStyle(e);
 if (!targetedBuild) {
 styleUtil.forEachRule(styleRules, function (rule) {
 styleTransformer.documentRule(rule);
-if (settings.useNativeCSSProperties && !buildType) {
-applyShim.transformRule(rule);
-}
 });
+if (settings.useNativeCSSProperties && !buildType) {
+applyShim.transform([e]);
+}
 }
 if (settings.useNativeCSSProperties) {
 e.textContent = styleUtil.toCssText(styleRules);
@@ -7180,8 +7237,7 @@ _forwardInstanceProp: function (inst, prop, value) {
 },
 _notifyPathUpImpl: function (path, value) {
 var dataHost = this.dataHost;
-var dot = path.indexOf('.');
-var root = dot < 0 ? path : path.slice(0, dot);
+var root = Polymer.Path.root(path);
 dataHost._forwardInstancePath.call(dataHost, this, path, value);
 if (root in dataHost._parentProps) {
 dataHost._templatized._notifyPath(dataHost._parentPropPrefix + path, value);
@@ -7191,7 +7247,7 @@ _pathEffectorImpl: function (path, value, fromAbove) {
 if (this._forwardParentPath) {
 if (path.indexOf(this._parentPropPrefix) === 0) {
 var subPath = path.substring(this._parentPropPrefix.length);
-var model = this._modelForPath(subPath);
+var model = Polymer.Path.root(subPath);
 if (model in this._parentProps) {
 this._forwardParentPath(subPath, value);
 }
@@ -8381,7 +8437,7 @@ this.fire('dom-change');
       return transformKey(keyEvent.key, noSpecialChars) ||
         transformKeyIdentifier(keyEvent.keyIdentifier) ||
         transformKeyCode(keyEvent.keyCode) ||
-        transformKey(keyEvent.detail.key, noSpecialChars) || '';
+        transformKey(keyEvent.detail ? keyEvent.detail.key : keyEvent.detail, noSpecialChars) || '';
     }
 
     function keyComboMatchesEvent(keyCombo, event) {
@@ -8436,12 +8492,31 @@ this.fire('dom-change');
      * and uses an expressive syntax to filter key presses.
      *
      * Use the `keyBindings` prototype property to express what combination of keys
-     * will trigger the event to fire.
+     * will trigger the callback. A key binding has the format
+     * `"KEY+MODIFIER:EVENT": "callback"` (`"KEY": "callback"` or
+     * `"KEY:EVENT": "callback"` are valid as well). Some examples:
      *
-     * Use the `key-event-target` attribute to set up event handlers on a specific
+     *      keyBindings: {
+     *        'space': '_onKeydown', // same as 'space:keydown'
+     *        'shift+tab': '_onKeydown',
+     *        'enter:keypress': '_onKeypress',
+     *        'esc:keyup': '_onKeyup'
+     *      }
+     *
+     * The callback will receive with an event containing the following information in `event.detail`:
+     *
+     *      _onKeydown: function(event) {
+     *        console.log(event.detail.combo); // KEY+MODIFIER, e.g. "shift+tab"
+     *        console.log(event.detail.key); // KEY only, e.g. "tab"
+     *        console.log(event.detail.event); // EVENT, e.g. "keydown"
+     *        console.log(event.detail.keyboardEvent); // the original KeyboardEvent
+     *      }
+     *
+     * Use the `keyEventTarget` attribute to set up event handlers on a specific
      * node.
-     * The `keys-pressed` event will fire when one of the key combinations set with the
-     * `keys` property is pressed.
+     *
+     * See the [demo source code](https://github.com/PolymerElements/iron-a11y-keys-behavior/blob/master/demo/x-key-aware.html)
+     * for an example.
      *
      * @demo demo/index.html
      * @polymerBehavior
@@ -8449,7 +8524,9 @@ this.fire('dom-change');
     Polymer.IronA11yKeysBehavior = {
       properties: {
         /**
-         * The HTMLElement that will be firing relevant KeyboardEvents.
+         * The EventTarget that will be firing relevant KeyboardEvents. Set it to
+         * `null` to disable the listeners.
+         * @type {?EventTarget}
          */
         keyEventTarget: {
           type: Object,
@@ -8488,6 +8565,12 @@ this.fire('dom-change');
         '_resetKeyEventListeners(keyEventTarget, _boundKeyHandlers)'
       ],
 
+
+      /**
+       * To be used to express what combination of keys  will trigger the relative
+       * callback. e.g. `keyBindings: { 'esc': '_onEscPressed'}`
+       * @type {!Object}
+       */
       keyBindings: {},
 
       registered: function() {
@@ -8595,6 +8678,9 @@ this.fire('dom-change');
       },
 
       _listenKeyEventListeners: function() {
+        if (!this.keyEventTarget) {
+          return;
+        }
         Object.keys(this._keyBindings).forEach(function(eventName) {
           var keyBindings = this._keyBindings[eventName];
           var boundKeyHandler = this._onKeyBindingEvent.bind(this, keyBindings);
@@ -8947,8 +9033,7 @@ Polymer({
          * `iconset_name:icon_name`.
          */
         icon: {
-          type: String,
-          observer: '_iconChanged'
+          type: String
         },
 
         /**
@@ -8956,8 +9041,7 @@ Polymer({
          * iconset.
          */
         theme: {
-          type: String,
-          observer: '_updateIcon'
+          type: String
         },
 
         /**
@@ -8966,19 +9050,24 @@ Polymer({
          * precedence over a given icon attribute.
          */
         src: {
-          type: String,
-          observer: '_srcChanged'
+          type: String
         },
 
         /**
          * @type {!Polymer.IronMeta}
          */
         _meta: {
-          value: Polymer.Base.create('iron-meta', {type: 'iconset'}),
-          observer: '_updateIcon'
+          value: Polymer.Base.create('iron-meta', {type: 'iconset'})
         }
 
       },
+
+      observers: [
+        '_updateIcon(_meta, isAttached)',
+        '_updateIcon(theme, isAttached)',
+        '_srcChanged(src, isAttached)',
+        '_iconChanged(icon, isAttached)'
+      ],
 
       _DEFAULT_ICONSET: 'icons',
 
@@ -9087,8 +9176,21 @@ Polymer({
       size: {
         type: Number,
         value: 24
-      }
+      },
 
+      /**
+       * Set to true to enable mirroring of icons where specified when they are
+       * stamped. Icons that should be mirrored should be decorated with a
+       * `mirror-in-rtl` attribute.
+       *
+       * NOTE: For performance reasons, direction will be resolved once per
+       * document per iconset, so moving icons in and out of RTL subtrees will
+       * not cause their mirrored state to change.
+       */
+      rtlMirroring: {
+        type: Boolean,
+        value: false
+      }
     },
 
     attached: function() {
@@ -9113,6 +9215,12 @@ Polymer({
      * An svg icon is prepended to the element's shadowRoot if it exists,
      * otherwise to the element itself.
      *
+     * If RTL mirroring is enabled, and the icon is marked to be mirrored in
+     * RTL, the element will be tested (once and only once ever for each
+     * iconset) to determine the direction of the subtree the element is in.
+     * This direction will apply to all future icon applications, although only
+     * icons marked to be mirrored will be affected.
+     *
      * @method applyIcon
      * @param {Element} element Element to which the icon is applied.
      * @param {string} iconName Name of the icon to apply.
@@ -9124,7 +9232,8 @@ Polymer({
       // Remove old svg element
       this.removeIcon(element);
       // install new svg element
-      var svg = this._cloneIcon(iconName);
+      var svg = this._cloneIcon(iconName,
+          this.rtlMirroring && this._targetIsRTL(element));
       if (svg) {
         var pde = Polymer.dom(element);
         pde.insertBefore(svg, pde.childNodes[0]);
@@ -9141,10 +9250,29 @@ Polymer({
      */
     removeIcon: function(element) {
       // Remove old svg element
+      element = element.root || element;
       if (element._svgIcon) {
         Polymer.dom(element).removeChild(element._svgIcon);
         element._svgIcon = null;
       }
+    },
+
+    /**
+     * Measures and memoizes the direction of the element. Note that this
+     * measurement is only done once and the result is memoized for future
+     * invocations.
+     */
+    _targetIsRTL: function(target) {
+      if (this.__targetIsRTL == null) {
+        if (target && target.nodeType !== Node.ELEMENT_NODE) {
+          target = target.host;
+        }
+
+        this.__targetIsRTL = target &&
+            window.getComputedStyle(target)['direction'] === 'rtl';
+      }
+
+      return this.__targetIsRTL;
     },
 
     /**
@@ -9183,28 +9311,35 @@ Polymer({
      * @return {Element} Returns an installable clone of the SVG element
      * matching `id`.
      */
-    _cloneIcon: function(id) {
+    _cloneIcon: function(id, mirrorAllowed) {
       // create the icon map on-demand, since the iconset itself has no discrete
       // signal to know when it's children are fully parsed
       this._icons = this._icons || this._createIconMap();
-      return this._prepareSvgClone(this._icons[id], this.size);
+      return this._prepareSvgClone(this._icons[id], this.size, mirrorAllowed);
     },
 
     /**
      * @param {Element} sourceSvg
      * @param {number} size
+     * @param {Boolean} mirrorAllowed
      * @return {Element}
      */
-    _prepareSvgClone: function(sourceSvg, size) {
+    _prepareSvgClone: function(sourceSvg, size, mirrorAllowed) {
       if (sourceSvg) {
         var content = sourceSvg.cloneNode(true),
             svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'),
-            viewBox = content.getAttribute('viewBox') || '0 0 ' + size + ' ' + size;
+            viewBox = content.getAttribute('viewBox') || '0 0 ' + size + ' ' + size,
+            cssText = 'pointer-events: none; display: block; width: 100%; height: 100%;';
+
+        if (mirrorAllowed && content.hasAttribute('mirror-in-rtl')) {
+          cssText += '-webkit-transform:scale(-1,1);transform:scale(-1,1);';
+        }
+
         svg.setAttribute('viewBox', viewBox);
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         // TODO(dfreedm): `pointer-events: none` works around https://crbug.com/370136
         // TODO(sjmiles): inline style may not be ideal, but avoids requiring a shadow-root
-        svg.style.cssText = 'pointer-events: none; display: block; width: 100%; height: 100%;';
+        svg.style.cssText = cssText;
         svg.appendChild(content).removeAttribute('id');
         return svg;
       }
@@ -12467,6 +12602,24 @@ Polymer({
         }
       },
 
+      attached: function() {
+        var inkSize = this.getComputedStyleValue('--calculated-paper-checkbox-ink-size');
+        // If unset, compute and set the default `--paper-checkbox-ink-size`.
+        if (inkSize === '-1px') {
+          var checkboxSize = parseFloat(this.getComputedStyleValue('--calculated-paper-checkbox-size'));
+          var defaultInkSize = Math.floor((8 / 3) * checkboxSize);
+
+          // The checkbox and ripple need to have the same parity so that their
+          // centers align.
+          if (defaultInkSize % 2 !== checkboxSize % 2) {
+            defaultInkSize++;
+          }
+
+          this.customStyle['--paper-checkbox-ink-size'] = defaultInkSize + 'px';
+          this.updateStyles();
+        }
+      },
+
       _computeCheckboxClass: function(checked, invalid) {
         var className = '';
         if (checked) {
@@ -13207,9 +13360,8 @@ Use `noOverlap` to position the element around another element without overlappi
     this._backdropElement = null;
 
     // Enable document-wide tap recognizer.
-    Polymer.Gestures.add(document, 'tap', null);
-    // Need to have useCapture=true, Polymer.Gestures doesn't offer that.
-    document.addEventListener('tap', this._onCaptureClick.bind(this), true);
+    Polymer.Gestures.add(document, 'tap', this._onCaptureClick.bind(this));
+
     document.addEventListener('focus', this._onCaptureFocus.bind(this), true);
     document.addEventListener('keydown', this._onCaptureKeyDown.bind(this), true);
   };
@@ -13324,9 +13476,6 @@ Use `noOverlap` to position the element around another element without overlappi
       }
       this._overlays.splice(insertionIndex, 0, overlay);
 
-      // Get focused node.
-      var element = this.deepActiveElement;
-      overlay.restoreFocusNode = this._overlayParent(element) ? null : element;
       this.trackBackdrop();
     },
 
@@ -13340,12 +13489,6 @@ Use `noOverlap` to position the element around another element without overlappi
       }
       this._overlays.splice(i, 1);
 
-      var node = overlay.restoreFocusOnClose ? overlay.restoreFocusNode : null;
-      overlay.restoreFocusNode = null;
-      // Focus back only if still contained in document.body
-      if (node && Polymer.dom(document.body).deepContains(node)) {
-        node.focus();
-      }
       this.trackBackdrop();
     },
 
@@ -13377,15 +13520,7 @@ Use `noOverlap` to position the element around another element without overlappi
 
     focusOverlay: function() {
       var current = /** @type {?} */ (this.currentOverlay());
-      // We have to be careful to focus the next overlay _after_ any current
-      // transitions are complete (due to the state being toggled prior to the
-      // transition). Otherwise, we risk infinite recursion when a transitioning
-      // (closed) overlay becomes the current overlay.
-      //
-      // NOTE: We make the assumption that any overlay that completes a transition
-      // will call into focusOverlay to kick the process back off. Currently:
-      // transitionend -> _applyFocus -> focusOverlay.
-      if (current && !current.transitioning) {
+      if (current) {
         current._applyFocus();
       }
     },
@@ -13474,27 +13609,10 @@ Use `noOverlap` to position the element around another element without overlappi
     },
 
     /**
-     * Returns the overlay containing the provided node. If the node is an overlay,
-     * it returns the node.
-     * @param {Element=} node
-     * @return {Element|undefined}
-     * @private
-     */
-    _overlayParent: function(node) {
-      while (node && node !== document.body) {
-        // Check if it is an overlay.
-        if (node._manager === this) {
-          return node;
-        }
-        // Use logical parentNode, or native ShadowRoot host.
-        node = Polymer.dom(node).parentNode || node.host;
-      }
-    },
-
-    /**
      * Returns the deepest overlay in the path.
      * @param {Array<Element>=} path
      * @return {Element|undefined}
+     * @suppress {missingProperties}
      * @private
      */
     _overlayInPath: function(path) {
@@ -13552,16 +13670,221 @@ Use `noOverlap` to position the element around another element without overlappi
      * @param {!Element} overlay1
      * @param {!Element} overlay2
      * @return {boolean}
+     * @suppress {missingProperties}
      * @private
      */
     _shouldBeBehindOverlay: function(overlay1, overlay2) {
-      var o1 = /** @type {?} */ (overlay1);
-      var o2 = /** @type {?} */ (overlay2);
-      return !o1.alwaysOnTop && o2.alwaysOnTop;
+      return !overlay1.alwaysOnTop && overlay2.alwaysOnTop;
     }
   };
 
   Polymer.IronOverlayManager = new Polymer.IronOverlayManagerClass();
+(function() {
+    'use strict';
+
+    var p = Element.prototype;
+    var matches = p.matches || p.matchesSelector || p.mozMatchesSelector ||
+      p.msMatchesSelector || p.oMatchesSelector || p.webkitMatchesSelector;
+
+    Polymer.IronFocusablesHelper = {
+
+      /**
+       * Returns a sorted array of tabbable nodes, including the root node.
+       * It searches the tabbable nodes in the light and shadow dom of the chidren,
+       * sorting the result by tabindex.
+       * @param {!Node} node
+       * @return {Array<HTMLElement>}
+       */
+      getTabbableNodes: function(node) {
+        var result = [];
+        // If there is at least one element with tabindex > 0, we need to sort
+        // the final array by tabindex.
+        var needsSortByTabIndex = this._collectTabbableNodes(node, result);
+        if (needsSortByTabIndex) {
+          return this._sortByTabIndex(result);
+        }
+        return result;
+      },
+
+      /**
+       * Returns if a element is focusable.
+       * @param {!HTMLElement} element
+       * @return {boolean}
+       */
+      isFocusable: function(element) {
+        // From http://stackoverflow.com/a/1600194/4228703:
+        // There isn't a definite list, it's up to the browser. The only
+        // standard we have is DOM Level 2 HTML https://www.w3.org/TR/DOM-Level-2-HTML/html.html,
+        // according to which the only elements that have a focus() method are
+        // HTMLInputElement,  HTMLSelectElement, HTMLTextAreaElement and
+        // HTMLAnchorElement. This notably omits HTMLButtonElement and
+        // HTMLAreaElement.
+        // Referring to these tests with tabbables in different browsers
+        // http://allyjs.io/data-tables/focusable.html
+
+        // Elements that cannot be focused if they have [disabled] attribute.
+        if (matches.call(element, 'input, select, textarea, button, object')) {
+          return matches.call(element, ':not([disabled])');
+        }
+        // Elements that can be focused even if they have [disabled] attribute.
+        return matches.call(element,
+          'a[href], area[href], iframe, [tabindex], [contentEditable]');
+      },
+
+      /**
+       * Returns if a element is tabbable. To be tabbable, a element must be
+       * focusable, visible, and with a tabindex !== -1.
+       * @param {!HTMLElement} element
+       * @return {boolean}
+       */
+      isTabbable: function(element) {
+        return this.isFocusable(element) &&
+          matches.call(element, ':not([tabindex="-1"])') &&
+          this._isVisible(element);
+      },
+
+      /**
+       * Returns the normalized element tabindex. If not focusable, returns -1.
+       * It checks for the attribute "tabindex" instead of the element property
+       * `tabIndex` since browsers assign different values to it.
+       * e.g. in Firefox `<div contenteditable>` has `tabIndex = -1`
+       * @param {!HTMLElement} element
+       * @return {!number}
+       * @private
+       */
+      _normalizedTabIndex: function(element) {
+        if (this.isFocusable(element)) {
+          var tabIndex = element.getAttribute('tabindex') || 0;
+          return Number(tabIndex);
+        }
+        return -1;
+      },
+
+      /**
+       * Searches for nodes that are tabbable and adds them to the `result` array.
+       * Returns if the `result` array needs to be sorted by tabindex.
+       * @param {!Node} node The starting point for the search; added to `result`
+       * if tabbable.
+       * @param {!Array<HTMLElement>} result
+       * @return {boolean}
+       * @private
+       */
+      _collectTabbableNodes: function(node, result) {
+        // If not an element or not visible, no need to explore children.
+        if (node.nodeType !== Node.ELEMENT_NODE || !this._isVisible(node)) {
+          return false;
+        }
+        var element = /** @type {HTMLElement} */ (node);
+        var tabIndex = this._normalizedTabIndex(element);
+        var needsSortByTabIndex = tabIndex > 0;
+        if (tabIndex >= 0) {
+          result.push(element);
+        }
+
+        // In ShadowDOM v1, tab order is affected by the order of distrubution.
+        // E.g. getTabbableNodes(#root) in ShadowDOM v1 should return [#A, #B];
+        // in ShadowDOM v0 tab order is not affected by the distrubution order,
+        // in fact getTabbableNodes(#root) returns [#B, #A].
+        //  <div id="root">
+        //   <!-- shadow -->
+        //     <slot name="a">
+        //     <slot name="b">
+        //   <!-- /shadow -->
+        //   <input id="A" slot="a">
+        //   <input id="B" slot="b" tabindex="1">
+        //  </div>
+        // TODO(valdrin) support ShadowDOM v1 when upgrading to Polymer v2.0.
+        var children;
+        if (element.localName === 'content') {
+          children = Polymer.dom(element).getDistributedNodes();
+        } else {
+          // Use shadow root if possible, will check for distributed nodes.
+          children = Polymer.dom(element.root || element).children;
+        }
+        for (var i = 0; i < children.length; i++) {
+          // Ensure method is always invoked to collect tabbable children.
+          var needsSort = this._collectTabbableNodes(children[i], result);
+          needsSortByTabIndex = needsSortByTabIndex || needsSort;
+        }
+        return needsSortByTabIndex;
+      },
+
+      /**
+       * Returns false if the element has `visibility: hidden` or `display: none`
+       * @param {!HTMLElement} element
+       * @return {boolean}
+       * @private
+       */
+      _isVisible: function(element) {
+        // Check inline style first to save a re-flow. If looks good, check also
+        // computed style.
+        var style = element.style;
+        if (style.visibility !== 'hidden' && style.display !== 'none') {
+          style = window.getComputedStyle(element);
+          return (style.visibility !== 'hidden' && style.display !== 'none');
+        }
+        return false;
+      },
+
+      /**
+       * Sorts an array of tabbable elements by tabindex. Returns a new array.
+       * @param {!Array<HTMLElement>} tabbables
+       * @return {Array<HTMLElement>}
+       * @private
+       */
+      _sortByTabIndex: function(tabbables) {
+        // Implement a merge sort as Array.prototype.sort does a non-stable sort
+        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort
+        var len = tabbables.length;
+        if (len < 2) {
+          return tabbables;
+        }
+        var pivot = Math.ceil(len / 2);
+        var left = this._sortByTabIndex(tabbables.slice(0, pivot));
+        var right = this._sortByTabIndex(tabbables.slice(pivot));
+        return this._mergeSortByTabIndex(left, right);
+      },
+
+      /**
+       * Merge sort iterator, merges the two arrays into one, sorted by tab index.
+       * @param {!Array<HTMLElement>} left
+       * @param {!Array<HTMLElement>} right
+       * @return {Array<HTMLElement>}
+       * @private
+       */
+      _mergeSortByTabIndex: function(left, right) {
+        var result = [];
+        while ((left.length > 0) && (right.length > 0)) {
+          if (this._hasLowerTabOrder(left[0], right[0])) {
+            result.push(right.shift());
+          } else {
+            result.push(left.shift());
+          }
+        }
+
+        return result.concat(left, right);
+      },
+
+      /**
+       * Returns if element `a` has lower tab order compared to element `b`
+       * (both elements are assumed to be focusable and tabbable).
+       * Elements with tabindex = 0 have lower tab order compared to elements
+       * with tabindex > 0.
+       * If both have same tabindex, it returns false.
+       * @param {!HTMLElement} a
+       * @param {!HTMLElement} b
+       * @return {boolean}
+       * @private
+       */
+      _hasLowerTabOrder: function(a, b) {
+        // Normalize tabIndexes
+        // e.g. in Firefox `<div contenteditable>` has `tabIndex = -1`
+        var ati = Math.max(a.tabIndex, 0);
+        var bti = Math.max(b.tabIndex, 0);
+        return (ati === 0 || bti === 0) ? bti > ati : ati > bti;
+      }
+    };
+  })();
 (function() {
 'use strict';
 
@@ -13570,9 +13893,12 @@ Use `Polymer.IronOverlayBehavior` to implement an element that can be hidden or 
 on top of other content. It includes an optional backdrop, and can be used to implement a variety
 of UI controls including dialogs and drop downs. Multiple overlays may be displayed at once.
 
+See the [demo source code](https://github.com/PolymerElements/iron-overlay-behavior/blob/master/demo/simple-overlay.html)
+for an example.
+
 ### Closing and canceling
 
-A dialog may be hidden by closing or canceling. The difference between close and cancel is user
+An overlay may be hidden by closing or canceling. The difference between close and cancel is user
 intent. Closing generally implies that the user acknowledged the content on the overlay. By default,
 it will cancel whenever the user taps outside it or presses the escape key. This behavior is
 configurable with the `no-cancel-on-esc-key` and the `no-cancel-on-outside-click` properties.
@@ -13590,6 +13916,10 @@ position and size it manually using CSS. See `Polymer.IronFitBehavior`.
 Set the `with-backdrop` attribute to display a backdrop behind the overlay. The backdrop is
 appended to `<body>` and is of type `<iron-overlay-backdrop>`. See its doc page for styling
 options.
+
+In addition, `with-backdrop` will wrap the focus within the content in the light DOM.
+Override the [`_focusableNodes` getter](#Polymer.IronOverlayBehavior:property-_focusableNodes)
+to achieve a different behavior.
 
 ### Limitations
 
@@ -13626,7 +13956,8 @@ context. You should place this element as a child of `<body>` whenever possible.
       },
 
       /**
-       * Set to true to display a backdrop behind the overlay.
+       * Set to true to display a backdrop behind the overlay. It traps the focus
+       * within the light DOM of the overlay.
        */
       withBackdrop: {
         observer: '_withBackdropChanged',
@@ -13735,45 +14066,7 @@ context. You should place this element as a child of `<body>` whenever possible.
      * @protected
      */
     get _focusableNodes() {
-      // Elements that can be focused even if they have [disabled] attribute.
-      var FOCUSABLE_WITH_DISABLED = [
-        'a[href]',
-        'area[href]',
-        'iframe',
-        '[tabindex]',
-        '[contentEditable=true]'
-      ];
-
-      // Elements that cannot be focused if they have [disabled] attribute.
-      var FOCUSABLE_WITHOUT_DISABLED = [
-        'input',
-        'select',
-        'textarea',
-        'button'
-      ];
-
-      // Discard elements with tabindex=-1 (makes them not focusable).
-      var selector = FOCUSABLE_WITH_DISABLED.join(':not([tabindex="-1"]),') +
-        ':not([tabindex="-1"]),' +
-        FOCUSABLE_WITHOUT_DISABLED.join(':not([disabled]):not([tabindex="-1"]),') +
-        ':not([disabled]):not([tabindex="-1"])';
-
-      var focusables = Polymer.dom(this).querySelectorAll(selector);
-      if (this.tabIndex >= 0) {
-        // Insert at the beginning because we might have all elements with tabIndex = 0,
-        // and the overlay should be the first of the list.
-        focusables.splice(0, 0, this);
-      }
-      // Sort by tabindex.
-      return focusables.sort(function (a, b) {
-        if (a.tabIndex === b.tabIndex) {
-          return 0;
-        }
-        if (a.tabIndex === 0 || a.tabIndex > b.tabIndex) {
-          return 1;
-        }
-        return -1;
-      });
+      return Polymer.IronFocusablesHelper.getTabbableNodes(this);
     },
 
     ready: function() {
@@ -13784,17 +14077,17 @@ context. You should place this element as a child of `<body>` whenever possible.
       this.__shouldRemoveTabIndex = false;
       // Used for wrapping the focus on TAB / Shift+TAB.
       this.__firstFocusableNode = this.__lastFocusableNode = null;
-      // Used for requestAnimationFrame when opened changes.
-      this.__openChangedAsync = null;
-      // Used for requestAnimationFrame when iron-resize is fired.
-      this.__onIronResizeAsync = null;
+      // Used by __onNextAnimationFrame to cancel any previous callback.
+      this.__raf = null;
+      // Focused node before overlay gets opened. Can be restored on close.
+      this.__restoreFocusNode = null;
       this._ensureSetup();
     },
 
     attached: function() {
       // Call _openedChanged here so that position can be computed correctly.
       if (this.opened) {
-        this._openedChanged();
+        this._openedChanged(this.opened);
       }
       this._observer = Polymer.dom(this).observeNodes(this._onNodesChange);
     },
@@ -13802,7 +14095,11 @@ context. You should place this element as a child of `<body>` whenever possible.
     detached: function() {
       Polymer.dom(this).unobserveNodes(this._observer);
       this._observer = null;
-      this.opened = false;
+      if (this.__raf) {
+        window.cancelAnimationFrame(this.__raf);
+        this.__raf = null;
+      }
+      this._manager.removeOverlay(this);
     },
 
     /**
@@ -13843,6 +14140,14 @@ context. You should place this element as a child of `<body>` whenever possible.
       this.opened = false;
     },
 
+    /**
+     * Invalidates the cached tabbable nodes. To be called when any of the focusable
+     * content changes (e.g. a button is disabled).
+     */
+    invalidateTabbables: function() {
+      this.__firstFocusableNode = this.__lastFocusableNode = null;
+    },
+
     _ensureSetup: function() {
       if (this._overlaySetup) {
         return;
@@ -13852,27 +14157,16 @@ context. You should place this element as a child of `<body>` whenever possible.
       this.style.display = 'none';
     },
 
-    _openedChanged: function() {
-      if (this.opened) {
+    /**
+     * Called when `opened` changes.
+     * @param {boolean=} opened
+     * @protected
+     */
+    _openedChanged: function(opened) {
+      if (opened) {
         this.removeAttribute('aria-hidden');
       } else {
         this.setAttribute('aria-hidden', 'true');
-      }
-
-      // wait to call after ready only if we're initially open
-      if (!this._overlaySetup) {
-        return;
-      }
-
-      if (this.__openChangedAsync) {
-        window.cancelAnimationFrame(this.__openChangedAsync);
-      }
-
-      // Synchronously remove the overlay.
-      // The adding is done asynchronously to go out of the scope of the event
-      // which might have generated the opening.
-      if (!this.opened) {
-        this._manager.removeOverlay(this);
       }
 
       // Defer any animation-related code on attached
@@ -13883,17 +14177,8 @@ context. You should place this element as a child of `<body>` whenever possible.
 
       this.__isAnimating = true;
 
-      // requestAnimationFrame for non-blocking rendering
-      this.__openChangedAsync = window.requestAnimationFrame(function() {
-        this.__openChangedAsync = null;
-        if (this.opened) {
-          this._manager.addOverlay(this);
-          this._prepareRenderOpened();
-          this._renderOpened();
-        } else {
-          this._renderClosed();
-        }
-      }.bind(this));
+      // Use requestAnimationFrame for non-blocking rendering.
+      this.__onNextAnimationFrame(this.__openedChanged);
     },
 
     _canceledChanged: function() {
@@ -13920,6 +14205,8 @@ context. You should place this element as a child of `<body>` whenever possible.
      * @protected
      */
     _prepareRenderOpened: function() {
+      // Store focused node.
+      this.__restoreFocusNode = this._manager.deepActiveElement;
 
       // Needed to calculate the size of the overlay so that transitions on its size
       // will have the correct starting points.
@@ -13927,10 +14214,11 @@ context. You should place this element as a child of `<body>` whenever possible.
       this.refit();
       this._finishPositioning();
 
-      // Safari will apply the focus to the autofocus element when displayed for the first time,
-      // so we blur it. Later, _applyFocus will set the focus if necessary.
+      // Safari will apply the focus to the autofocus element when displayed
+      // for the first time, so we make sure to return the focus where it was.
       if (this.noAutoFocus && document.activeElement === this._focusNode) {
         this._focusNode.blur();
+        this.__restoreFocusNode.focus();
       }
     },
 
@@ -13955,16 +14243,8 @@ context. You should place this element as a child of `<body>` whenever possible.
      * @protected
      */
     _finishRenderOpened: function() {
-      // Focus the child node with [autofocus]
-      this._applyFocus();
-
       this.notifyResize();
       this.__isAnimating = false;
-
-      // Store it so we don't query too much.
-      var focusableNodes = this._focusableNodes;
-      this.__firstFocusableNode = focusableNodes[0];
-      this.__lastFocusableNode = focusableNodes[focusableNodes.length - 1];
 
       this.fire('iron-overlay-opened');
     },
@@ -13974,13 +14254,10 @@ context. You should place this element as a child of `<body>` whenever possible.
      * @protected
      */
     _finishRenderClosed: function() {
-      // Hide the overlay and remove the backdrop.
+      // Hide the overlay.
       this.style.display = 'none';
       // Reset z-index only at the end of the animation.
       this.style.zIndex = '';
-
-      this._applyFocus();
-
       this.notifyResize();
       this.__isAnimating = false;
       this.fire('iron-overlay-closed', this.closingReason);
@@ -14016,10 +14293,22 @@ context. You should place this element as a child of `<body>` whenever possible.
         if (!this.noAutoFocus) {
           this._focusNode.focus();
         }
-      } else {
+      }
+      else {
         this._focusNode.blur();
         this._focusedChild = null;
-        this._manager.focusOverlay();
+        // Restore focus.
+        if (this.restoreFocusOnClose && this.__restoreFocusNode) {
+          this.__restoreFocusNode.focus();
+        }
+        this.__restoreFocusNode = null;
+        // If many overlays get closed at the same time, one of them would still
+        // be the currentOverlay even if already closed, and would call _applyFocus
+        // infinitely, so we check for this not to be the current overlay.
+        var currentOverlay = this._manager.currentOverlay();
+        if (currentOverlay && this !== currentOverlay) {
+          currentOverlay._applyFocus();
+        }
       }
     },
 
@@ -14073,6 +14362,7 @@ context. You should place this element as a child of `<body>` whenever possible.
       if (!this.withBackdrop) {
         return;
       }
+      this.__ensureFirstLastFocusables();
       // TAB wraps from last to first focusable.
       // Shift + TAB wraps from first to last focusable.
       var shift = event.shiftKey;
@@ -14117,15 +14407,8 @@ context. You should place this element as a child of `<body>` whenever possible.
      * @protected
      */
     _onIronResize: function() {
-      if (this.__onIronResizeAsync) {
-        window.cancelAnimationFrame(this.__onIronResizeAsync);
-        this.__onIronResizeAsync = null;
-      }
       if (this.opened && !this.__isAnimating) {
-        this.__onIronResizeAsync = window.requestAnimationFrame(function() {
-          this.__onIronResizeAsync = null;
-          this.refit();
-        }.bind(this));
+        this.__onNextAnimationFrame(this.refit);
       }
     },
 
@@ -14136,9 +14419,66 @@ context. You should place this element as a child of `<body>` whenever possible.
      */
     _onNodesChange: function() {
       if (this.opened && !this.__isAnimating) {
+        // It might have added focusable nodes, so invalidate cached values.
+        this.invalidateTabbables();
         this.notifyResize();
       }
+    },
+
+    /**
+     * Will set first and last focusable nodes if any of them is not set.
+     * @private
+     */
+    __ensureFirstLastFocusables: function() {
+      if (!this.__firstFocusableNode || !this.__lastFocusableNode) {
+        var focusableNodes = this._focusableNodes;
+        this.__firstFocusableNode = focusableNodes[0];
+        this.__lastFocusableNode = focusableNodes[focusableNodes.length - 1];
+      }
+    },
+
+    /**
+     * Tasks executed when opened changes: prepare for the opening, move the
+     * focus, update the manager, render opened/closed.
+     * @private
+     */
+    __openedChanged: function() {
+      if (this.opened) {
+        // Make overlay visible, then add it to the manager.
+        this._prepareRenderOpened();
+        this._manager.addOverlay(this);
+        // Move the focus to the child node with [autofocus].
+        this._applyFocus();
+
+        this._renderOpened();
+      } else {
+        // Remove overlay, then restore the focus before actually closing.
+        this._manager.removeOverlay(this);
+        this._applyFocus();
+
+        this._renderClosed();
+      }
+    },
+
+    /**
+     * Executes a callback on the next animation frame, overriding any previous
+     * callback awaiting for the next animation frame. e.g.
+     * `__onNextAnimationFrame(callback1) && __onNextAnimationFrame(callback2)`;
+     * `callback1` will never be invoked.
+     * @param {!Function} callback Its `this` parameter is the overlay itself.
+     * @private
+     */
+    __onNextAnimationFrame: function(callback) {
+      if (this.__raf) {
+        window.cancelAnimationFrame(this.__raf);
+      }
+      var self = this;
+      this.__raf = window.requestAnimationFrame(function nextAnimationFrame() {
+        self.__raf = null;
+        callback.call(self);
+      });
     }
+
   };
 
   /** @polymerBehavior */
@@ -19972,6 +20312,36 @@ Polymer({
 
         properties: {
           /**
+           * The element to fit `this` into.
+           * Overridden from `Polymer.IronFitBehavior`.
+           */
+          fitInto: {
+            type: Object,
+            value: window,
+            observer: '_onFitIntoChanged'
+          },
+
+          /**
+           * The orientation against which to align the dropdown content
+           * horizontally relative to `positionTarget`.
+           * Overridden from `Polymer.IronFitBehavior`.
+           */
+          horizontalAlign: {
+            type: String,
+            value: 'left'
+          },
+
+          /**
+           * The orientation against which to align the dropdown content
+           * vertically relative to `positionTarget`.
+           * Overridden from `Polymer.IronFitBehavior`.
+           */
+          verticalAlign: {
+            type: String,
+            value: 'bottom'
+          },
+
+          /**
            * The duration in milliseconds to show the toast.
            * Set to `0`, a negative number, or `Infinity`, to disable the
            * toast auto-closing.
@@ -20019,7 +20389,7 @@ Polymer({
          * @deprecated
          */
         get visible() {
-          console.warn('`visible` is deprecated, use `opened` instead');
+          Polymer.Base._warn('`visible` is deprecated, use `opened` instead');
           return this.opened;
         },
 
@@ -20047,11 +20417,11 @@ Polymer({
           }
           for (var property in properties) {
             if (property.indexOf('_') === 0) {
-              console.warn('The property "' + property + '" is private and was not set.');
+              Polymer.Base._warn('The property "' + property + '" is private and was not set.');
             } else if (property in this) {
               this[property] = properties[property];
             } else {
-              console.warn('The property "' + property + '" is not valid.');
+              Polymer.Base._warn('The property "' + property + '" is not valid.');
             }
           }
           this.open();
@@ -20062,20 +20432,6 @@ Polymer({
          */
         hide: function() {
           this.close();
-        },
-
-        /**
-         * Overridden from `IronFitBehavior`.
-         * Positions the toast at the bottom left of fitInto.
-         */
-        center: function () {
-          if (this.fitInto === window) {
-            this.style.bottom = this.style.left = '';
-          } else {
-            var rect = this.fitInto.getBoundingClientRect();
-            this.style.left = rect.left + 'px';
-            this.style.bottom = (window.innerHeight - rect.bottom) + 'px';
-          }
         },
 
         /**
@@ -20137,16 +20493,10 @@ Polymer({
         },
 
         /**
-         * Overridden from `IronOverlayBehavior`.
-         * iron-fit-behavior will set the inline style position: static, which
-         * causes the toast to be rendered incorrectly when opened by default.
+         * @private
          */
-        _onIronResize: function() {
-          Polymer.IronOverlayBehaviorImpl._onIronResize.apply(this, arguments);
-          if (this.opened) {
-            // Make sure there is no inline style for position.
-            this.style.position = '';
-          }
+        _onFitIntoChanged: function(fitInto) {
+          this.positionTarget = fitInto;
         }
 
         /**
@@ -21425,18 +21775,30 @@ Polymer({
      * @event google-map-rightclick
      * @param {google.maps.MouseEvent} event The mouse event.
      */
+    /**
+     * Fired when the map becomes idle after panning or zooming.
+     * @event google-map-idle
+    */
 
     /**
      * Polymer properties for the google-map custom element.
      */
     properties: {
       /**
-       * A Maps API key. To obtain an API key, see developers.google.com/maps/documentation/javascript/tutorial#api_key.
+       * A Maps API key. To obtain an API key, see https://developers.google.com/maps/documentation/javascript/tutorial#api_key.
        */
       apiKey: String,
 
       /**
-       * A Maps API for Business Client ID. To obtain a Maps API for Business Client ID, see developers.google.com/maps/documentation/business/.
+       * Overrides the origin the Maps API is loaded from. Defaults to `https://maps.googleapis.com`.
+       */
+      mapsUrl: {
+        type: String
+        // Initial value set in google-maps-api.
+      },
+
+      /**
+       * A Maps API for Business Client ID. To obtain a Maps API for Business Client ID, see https://developers.google.com/maps/documentation/business/.
        * If set, a Client ID will take precedence over an API Key.
        */
       clientId: String,
@@ -21525,6 +21887,24 @@ Polymer({
       },
 
       /**
+       * If set, removes the map's 'map type' UI controls.
+       */
+      disableMapTypeControl: {
+        type: Boolean,
+        value: false,
+        observer: '_disableMapTypeControlChanged'
+      },
+
+      /**
+       * If set, removes the map's 'street view' UI controls.
+       */
+      disableStreetViewControl: {
+        type: Boolean,
+        value: false,
+        observer: '_disableStreetViewControlChanged'
+      },
+
+      /**
        * If set, the zoom level is set such that all markers (google-map-marker children) are brought into view.
        */
       fitToMarkers: {
@@ -21544,7 +21924,7 @@ Polymer({
 
       /**
        * If set, custom styles can be applied to the map.
-       * For style documentation see developers.google.com/maps/documentation/javascript/reference#MapTypeStyle
+       * For style documentation see https://developers.google.com/maps/documentation/javascript/reference#MapTypeStyle
        */
       styles: {
         type: Object,
@@ -21674,9 +22054,9 @@ Polymer({
     },
 
     detached: function() {
-      if (this._mutationObserver) {
-        this._mutationObserver.disconnect();
-        this._mutationObserver = null;
+      if (this._markersChildrenListener) {
+        this.unlisten(this.$.selector, 'items-changed', '_updateMarkers');
+        this._markersChildrenListener = null;
       }
       if (this._objectsMutationObserver) {
         this._objectsMutationObserver.disconnect();
@@ -21715,6 +22095,8 @@ Polymer({
         tilt: this.noAutoTilt ? 0 : 45,
         mapTypeId: this.mapType,
         disableDefaultUI: this.disableDefaultUi,
+        mapTypeControl: !this.disableDefaultUi && !this.disableMapTypeControl,
+        streetViewControl: !this.disableDefaultUi && !this.disableStreetViewControl,
         disableDoubleClickZoom: this.disableZoom,
         scrollwheel: !this.disableZoom,
         styles: this.styles,
@@ -21744,13 +22126,10 @@ Polymer({
     // watch for future updates to marker objects
     _observeMarkers: function() {
       // Watch for future updates.
-      if (this._mutationObserver) {
+      if (this._markersChildrenListener) {
         return;
       }
-      this._mutationObserver = new MutationObserver(this._updateMarkers.bind(this));
-      this._mutationObserver.observe(this.$.selector, {
-        childList: true
-      });
+      this._markersChildrenListener = this.listen(this.$.selector, 'items-changed', '_updateMarkers');
     },
 
     _updateMarkers: function() {
@@ -21764,7 +22143,7 @@ Polymer({
         }.bind(this));
         if (added.length === 0) {
           // set up observer first time around
-          if (!this._mutationObserver) {
+          if (!this._markersChildrenListener) {
             this._observeMarkers();
           }
           return;
@@ -21898,6 +22277,14 @@ Polymer({
       }
     },
 
+    _idleEvent: function() {
+      if (this.map) {
+        this._forwardEvent('idle');
+      } else {
+        this._clearListener('idle');
+      }
+    },
+
     _clickEventsChanged: function() {
       if (this.map) {
         if (this.clickEvents) {
@@ -21965,6 +22352,20 @@ Polymer({
       this.map.setOptions({disableDefaultUI: this.disableDefaultUi});
     },
 
+    _disableMapTypeControlChanged: function() {
+      if (!this.map) {
+        return;
+      }
+      this.map.setOptions({mapTypeControl: !this.disableMapTypeControl});
+    },
+
+    _disableStreetViewControlChanged: function() {
+      if (!this.map) {
+        return;
+      }
+      this.map.setOptions({streetViewControl: !this.disableStreetViewControl});
+    },
+
     _disableZoomChanged: function() {
       if (!this.map) {
         return;
@@ -22024,6 +22425,7 @@ Polymer({
       this._clickEventsChanged();
       this._dragEventsChanged();
       this._mouseEventsChanged();
+      this._idleEvent();
     },
 
     _clearListener: function(name) {
@@ -22114,6 +22516,7 @@ Polymer({
        */
       buttonsLoaded_: function(buttons) {
         this.paperButtonsWidth = buttons.target.clientWidth;
+        this.resize_();
       },
 
       /**
@@ -22139,12 +22542,17 @@ Polymer({
 
       is: 'gpm-bottom-sheet',
 
+      hostAttributes: {
+        'role': 'dialog',
+        'tabindex': '0',
+      },
+
       properties: {
         /**
-         * The url of the bottom sheet's logo image.
+         * The url of the bottom sheet's decorative image.
          * @type {string}
          */
-        logoImage: {
+        decorativeImageSrc: {
           type: String,
           value: '',
         },
@@ -22157,7 +22565,7 @@ Polymer({
           type: Boolean,
           value: false,
           reflectToAttribute: true,
-          observer: 'openedChanged_'
+          observer: 'openedChanged_',
         }
       },
 
@@ -22199,175 +22607,102 @@ Polymer({
 Polymer({
       is: 'gpm-card-grid',
     });
-Polymer({
-      is: 'gpm-expandable-menu',
+window.MusicBehaviors = window.MusicBehaviors || {};
 
+  /**
+   * @polymerBehavior
+   */
+  MusicBehaviors.FocusableBehavior = {
 
-      hostAttributes: {
-        'role': 'toolbar',
-        'tabindex': '-1'
-      },
+    /**
+     * @override
+     */
+    created: function() {
+      // The handle for canceling the blur async task.
+      // See: https://www.polymer-project.org/1.0/api/#Polymer.Base:method-cancelAsync
+      this.blurHandle_ = null;
+    },
 
+    /**
+     * @override
+     */
+    ready: function() {
+      this.addEventListener('focus', this.focusBlurHandler_.bind(this), true);
+      this.addEventListener('blur', this.focusBlurHandler_.bind(this), true);
+    },
 
-      behaviors: [
-        Polymer.IronA11yKeysBehavior,
-        Polymer.IronResizableBehavior
-      ],
-
-
-      listeners: {
-        'iron-resize': 'resetFocusable_',
-      },
-
-
-      properties: {
-        /**
-         * Whether or not the menu is open.
-         * @type {boolean}
-         */
-        opened: {
-          type: Boolean,
-          value: false,
-          reflectToAttribute: true,
-          observer: 'openedChanged_'
-        },
-      },
-
+    properties: {
 
       /**
-       * Set up click and keyboard listeners.
+       * If true, the element currently has focus.
        */
-      ready: function() {
-         /** @private {!Function} */
-        this.boundClickListener_ = this.handleClick_.bind(this);
-        /** @private {!Function} */
-        this.boundKeydownListener_ = this.handleKeydown_.bind(this);
+      focused: {
+        type: Boolean,
+        value: false,
+        reflectToAttribute: true,
+        readOnly: true,
+        notify: true,
       },
 
+    },
 
-      /**
-       * Opens the menu and saves elements for focus.
-       */
-      open: function() {
-        this.opened = true;
-        /** @private {!Element} */
-        this.menuButton_= document.activeElement;
-        this.resetFocusable_();
-        this.firstFocusableNode_.focus();
-        this.fire('menu-opened');
-      },
-
-
-      /**
-       * Closes the menu.
-       */
-      close: function() {
-        this.opened = false;
-        this.restoreFocus_();
-        this.fire('menu-closed');
-      },
-
-
-      /**
-       * Toggles the menu.
-       */
-      toggle: function() {
-        this.opened ? this.close() : this.open();
-      },
-
-
-      /**
-       * Handles changes to the menu opened property.
-       * @private {boolean} opened
-       */
-      openedChanged_: function(opened) {
-        if (opened) {
-          document.addEventListener('click', this.boundClickListener_, true);
-          document.addEventListener('keydown', this.boundKeydownListener_, true);
-        } else {
-          document.removeEventListener('click', this.boundClickListener_, true);
-          document.removeEventListener('keydown', this.boundKeydownListener_, true);
+    /**
+     * Handles focus and blur events from the elements's local dom, updating
+     * the `focused` attribute accordingly.
+     * @param {!FocusEvent} event
+     * @private
+     */
+    focusBlurHandler_: function(event) {
+      if (event.type == 'focus') {
+        this._setFocused(true);
+        if (this.blurHandle_) {
+          this.cancelAsync(this.blurHandle_);
         }
-        this.setAttribute('aria-expanded', opened);
-      },
+      } else {
+        // We remove the `focused` attribute asynchronously, so that if
+        // another element in the element's local dom gains focus immediately,
+        // we can cancel.
+        this.blurHandle_ = this.async(function() {
+          this._setFocused(false);
+        }, 10);
+      }
+    },
 
+  };
+window.MusicBehaviors = window.MusicBehaviors || {};
+
+  /**
+   * @polymerBehavior
+   */
+  MusicBehaviors.LoggableBehavior = {
+
+    properties: {
+      /**
+       * The log token of this element.
+       * @type {string}
+       */
+      logToken: {
+        type: String,
+        reflectToAttribute: true,
+      },
 
       /**
-       * Captures click events, closing the menu on click outside.
-       * @param {!ClickEvent} event
-       * @private
+       * The token of the containing module, if any.
+       * @type {string}
        */
-      handleClick_: function(event){
-        if (!Polymer.dom(this).deepContains(event.target) && event.target != this.menuButton_) {
-          this.close();
-        }
+      moduleToken: {
+        type: String,
       },
-
 
       /**
-       * Captures keydown events: tab, shift+tab, and esc.
-       * @param {!KeyboardEvent} event
-       * @private
+       * The index of the containing module, if any.
+       * @type {number}
        */
-      handleKeydown_: function(event) {
-        if (Polymer.IronA11yKeysBehavior.keyboardEventMatchesKeys(event, 'tab')) {
-          if(event.shiftKey && document.activeElement == this.firstFocusableNode_) {
-            event.preventDefault();
-            event.stopPropagation();
-            this.lastFocusableNode_.focus();
-          } else if(!event.shiftKey && document.activeElement == this.lastFocusableNode_) {
-            event.preventDefault();
-            event.stopPropagation();
-            this.firstFocusableNode_.focus();
-          }
-        } else if (Polymer.IronA11yKeysBehavior.keyboardEventMatchesKeys(event, 'esc')) {
-          this.close();
-        }
+      moduleIndex: {
+        type: Number,
       },
-
-
-      /**
-       * Returns list of all currently focusable and visible nodes in menu.
-       * @return {!Array<!Element>} focusable nodes
-       * @private
-       */
-      getFocusableNodes_: function() {
-        var selector = 'a[href]:not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])';
-        var focusables = Polymer.dom(this).querySelectorAll(selector);
-        /* If display=none in CSS styling, then element is not focusable */
-        for (var i = focusables.length - 1; i >= 0; i--) {
-          if (window.getComputedStyle(focusables[i]).display === 'none') {
-            focusables.splice(i, 1);
-          }
-        }
-        return focusables;
-      },
-
-
-      /**
-       * Restores focus to the button that triggered the open.
-       * @private
-       */
-      restoreFocus_: function() {
-        var button = this.menuButton_;
-        if (button && Polymer.dom(document.body).deepContains(button)) {
-          button.focus();
-        }
-      },
-
-
-      /**
-       * Reset focusable nodes in list on menu open and on resize.
-       * @private
-       */
-      resetFocusable_: function() {
-        var focusableNodes = this.getFocusableNodes_();
-        /** @private {!Element} */
-        this.firstFocusableNode_ = focusableNodes[0] || this;
-        /** @private {!Element} */
-        this.lastFocusableNode_ = focusableNodes[focusableNodes.length - 1] || this;
-      },
-    });
+    },
+  };
 window.MusicBehaviors = window.MusicBehaviors || {};
 
   /**
@@ -22390,6 +22725,7 @@ window.MusicBehaviors = window.MusicBehaviors || {};
 
       /**
        * Whether the item is currently loading.
+       * @type {boolean}
        */
       loading: {
         type: Boolean,
@@ -22397,6 +22733,64 @@ window.MusicBehaviors = window.MusicBehaviors || {};
         reflectToAttribute: true,
         notify: true,
       },
+
+      /**
+       * The size of the play button.
+       * @type {string}
+       */
+      playButtonSize: {
+        type: String,
+        value: 'default',
+      },
+
+      /**
+       * The background color of the play button.
+       * @type {string}
+       */
+      playButtonColor: {
+        type: String,
+      },
+
+      /**
+       * The icon color of the play button.
+       * @type {string}
+       */
+      playButtonIconColor: {
+        type: String,
+      },
+
+      /**
+       * The loading spinner color.
+       * @type {string}
+       */
+      playButtonLoadingColor: {
+        type: String,
+      },
+
+      /**
+       * The play button pulse color.
+       * @type {string}
+       */
+      playButtonPulseColor: {
+        type: String,
+      },
+
+      /**
+       * The label for the play button.
+       * @type {string}
+       */
+      playLabel: {
+        type: String,
+      },
+
+      /**
+       * The label for the pause button.
+       * @type {string}
+       */
+      pauseLabel: {
+        type: String,
+      },
+
     },
 
     /**
@@ -22427,14 +22821,6 @@ Polymer({
         Polymer.PaperButtonBehavior,
         Polymer.PaperInkyFocusBehavior
       ],
-
-      // I don't think this should be necessary. Will file a bug on the Polymer team and
-      // add a reference here.
-      attached: function() {
-        this.primaryColorChanged_(this.primaryColor);
-        this.iconColorChanged_(this.iconColor);
-        this.loadingColorChanged_(this.loadingColor);
-      },
 
       properties: {
         // TODO(b/23588410): Consider making this an enum once we have compilation.
@@ -22501,6 +22887,7 @@ Polymer({
         ariaLabel: {
           type: String,
           reflectToAttribute: true,
+          notify: true,
           computed: 'computeAriaLabel_(playLabel, pauseLabel, playbackState)',
         },
 
@@ -22530,27 +22917,19 @@ Polymer({
         },
 
         /**
-         * The Animation Player object for the playing pulse animation.
-         * See: https://developer.mozilla.org/en-US/docs/Web/API/Animation
-         * @private {?Animation}
-         */
-        pulseAnimation_: {
-          type: Object
-        },
-
-        /**
-         * Whether to constrain the playing pulse animation.
+         * If true, will not show a pulse animation.
          * @type {boolean}
          */
-        constrainedPulse: {
+        noPulse: {
           type: Boolean,
+          value: false,
           reflectToAttribute: true,
         },
       },
 
       observers: [
         'updateIcon_(playbackState)',
-        'updatePlabackState_(playbackState)',
+        'updatePlaybackState_(playbackState)',
       ],
 
       /**
@@ -22696,6 +23075,12 @@ Polymer({
 
         this.animation_ = document.timeline.play(effect);
         this.animation_.onfinish = function() {
+          // A document's timeline is inactive if the associated document is not the active document
+          // in the browsing context (https://w3c.github.io/web-animations/#inactive-timeline).
+          // This results in the onsample method never getting run if the user taps the button and
+          // then navigates to a different tab before the playback state changes. Manually update
+          // icon here to ensure new playback status is reflected. See b/31434891.
+          this.$.iconPath.setAttribute('d', targetPath.join(''));
           this.animation_ = null;
         }.bind(this);
       },
@@ -22721,7 +23106,7 @@ Polymer({
        * @param {MusicBehaviors.PlayableBehavior.PlaybackState} playbackState
        * @private
        */
-      updatePlabackState_: function(playbackState) {
+      updatePlaybackState_: function(playbackState) {
         if (this.isPlaying()) {
           this.$.pulse.classList.add('animating');
         } else {
@@ -22734,233 +23119,390 @@ Polymer({
       },
     });
 Polymer({
-      is: 'sj-card',
+  is: 'gpm-colored-now-card',
+
+  behaviors: [
+    MusicBehaviors.FocusableBehavior,
+    MusicBehaviors.LoggableBehavior,
+    MusicBehaviors.PlayableBehavior,
+  ],
+
+  listeners: {
+    'contentWrapper.tap': 'handleTap_',
+  },
+
+  properties: {
+    /**
+     * The background color of the card. This maps to
+     * --gpm-now-card-background-color.
+     * @type {string}
+     */
+    backgroundColor: {
+      type: String,
+      value: '#fff',
+    },
+
+    /**
+     * The background image of the card.
+     * @type {string}
+     */
+    backgroundImage: {
+      type: String,
+      value: '',
+    },
+
+    /**
+     * The header text color of the card. This maps to
+     * --gpm-now-card-header-color.
+     * @type {string}
+     */
+    headerColor: {
+      type: String,
+      observer: 'headerColorChanged_',
+    },
+
+    /**
+     * The reason text color of the card. This maps to
+     * --gpm-now-card-reason-color.
+     * @type {string}
+     */
+    reasonColor: {
+      type: String,
+      observer: 'reasonColorChanged_',
+    },
+
+    /**
+     * The title text color of the card. This maps to
+     * --gpm-now-card-title-color.
+     * @type {string}
+     */
+    titleColor: {
+      type: String,
+      observer: 'titleColorChanged_',
+    },
+
+    /**
+     * The description text color of the card. This maps to
+     * --gpm-now-card-description-color.
+     * @type {string}
+     */
+    descriptionColor: {
+      type: String,
+      observer: 'descriptionColorChanged_',
+    },
+
+    /**
+     * The text separator color of the card. This maps to
+     * --gpm-now-card-separator-color.
+     * @type {string}
+     */
+    textSeparatorColor: {
+      type: String,
+      observer: 'textSeparatorColorChanged_',
+    },
+  },
+
+  observers: [
+    'backgroundChanged_(backgroundColor, backgroundImage)',
+  ],
+
+  /**
+   * Returns the title of the playable item in this component.
+   * @return {string}
+   * @override
+   */
+  get title() {
+    var titleElement = Polymer.dom(this.$.textWrapper)
+                           .queryDistributedElements('.card-title')[0];
+    return titleElement ? titleElement.textContent : '';
+  },
+
+  /**
+   * Updates the background styling with the provided background color and
+   * image.
+   * @param {string} backgroundColor
+   * @private
+   */
+  backgroundChanged_: function(backgroundColor) {
+    this.updateStyles({'--gpm-now-card-background-color': backgroundColor});
+    var parsed = this.parseRgba_(backgroundColor);
+    var gradient = 'linear-gradient(to top, ' + backgroundColor + ', ' +
+        this.composeRgba_(parsed, 0.5) + ')';
+    this.$.textProtection.style['background-image'] = gradient;
+  },
+
+  /**
+   * Propagates the header color value down to the corresponding CSS custom
+   * property.
+   * @param {string} headerColor
+   * @private
+   */
+  headerColorChanged_: function(headerColor) {
+    this.updateStyles({'--gpm-now-card-header-color': headerColor});
+  },
+
+  /**
+   * Propagates the reason color value down to the corresponding CSS custom
+   * property.
+   * @param {string} reasonColor
+   * @private
+   */
+  reasonColorChanged_: function(reasonColor) {
+    this.updateStyles({'--gpm-now-card-reason-color': reasonColor});
+  },
+
+  /**
+   * Propagates the title color value down to the corresponding CSS custom
+   * property.
+   * @param {string} titleColor
+   * @private
+   */
+  titleColorChanged_: function(titleColor) {
+    this.updateStyles({'--gpm-now-card-title-color': titleColor});
+  },
+
+  /**
+   * Propagates the description color value down to the corresponding CSS custom
+   * property.
+   * @param {string} descriptionColor
+   * @private
+   */
+  descriptionColorChanged_: function(descriptionColor) {
+    this.updateStyles({'--gpm-now-card-description-color': descriptionColor});
+  },
+
+  /**
+   * Propagates the text separator color value down to the corresponding CSS
+   * custom property.
+   * @param {string} separatorColor
+   * @private
+   */
+  textSeparatorColorChanged_: function(separatorColor) {
+    this.updateStyles({'--gpm-now-card-separator-color': separatorColor});
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  handleTap_: function(e) {
+    var localTarget = Polymer.dom(e).localTarget;
+    if (localTarget == this.$.playButton || localTarget == this.$.cardTitle) {
+      return;
+    }
+    this.fire('gpm-scroll-to-module', {moduleId: this.moduleToken});
+    e.preventDefault();
+    e.stopPropagation();
+  },
+
+  /**
+   * Parses an rgba value into its individual parts.
+   * @param {string} color
+   * @return {!Array<int>}
+   * @private
+   */
+  parseRgba_: function(color) {
+    return color.split('(')[1].split(')')[0].split(',').map(function(val) {
+      return parseInt(val, 10);
+    });
+  },
+
+  /**
+   * Composes an rgba value out of its individual parts.
+   * @param {!Array<number>} fractions
+   * @param {number} alpha
+   * @return {string}
+   * @private
+   */
+  composeRgba_: function(fractions, alpha) {
+    fractions = fractions.slice(0, 3);
+    return 'rgba(' + fractions.join(',') + ',' + alpha + ')';
+  },
+
+});
+Polymer({
+      is: 'gpm-expandable-menu',
+
+
+      hostAttributes: {
+        'role': 'toolbar',
+        'tabindex': '-1'
+      },
+
 
       behaviors: [
-        MusicBehaviors.PlayableBehavior,
+        Polymer.IronA11yKeysBehavior,
+        Polymer.IronResizableBehavior
       ],
 
-      ready: function() {
-        this.addEventListener('focus', this.boundFocusBlurHandler_, true);
-        this.addEventListener('blur', this.boundFocusBlurHandler_, true);
-        this.listen(this.$.imageWrapper, 'click', 'createRipple_');
+
+      listeners: {
+        'iron-resize': 'resetFocusable_',
       },
+
 
       properties: {
         /**
-         * The title of the card.
-         * @type {string}
-         */
-        cardTitle: {
-          type: String,
-        },
-
-        /**
-         * The subtitle of the card.
-         * @type {string}
-         */
-        cardSubtitle: {
-          type: String,
-        },
-
-        /**
-         * Text that should be overlaid on the card image.
-         * @type {string}
-         */
-        overlayText: {
-          type: String,
-        },
-
-        /**
-         * The background color of the play button.
-         * @type {string}
-         */
-        playButtonColor: {
-          type: String,
-        },
-
-        /**
-         * The size of the play button.
-         * @type {string}
-         */
-        playButtonSize: {
-          type: String,
-          value: 'default',
-        },
-
-        /**
-         * The icon color of the play button.
-         * @type {string}
-         */
-        playButtonIconColor: {
-          type: String,
-        },
-
-        /**
-         * The loading spinner color.
-         * @type {string}
-         */
-        playButtonLoadingColor: {
-          type: String,
-        },
-
-        /**
-         * The play button pulse color.
-         * @type {string}
-         */
-        playButtonPulseColor: {
-          type: String,
-        },
-
-        /**
-         * The label for the play button.
-         * @type {string}
-         */
-        playLabel: {
-          type: String,
-        },
-
-        /**
-         * The label for the pause button.
-         * @type {string}
-         */
-        pauseLabel: {
-          type: String,
-        },
-
-        /**
-         * The label for the menu button.
-         * @type {string}
-         */
-        menuLabel: {
-          type: String,
-        },
-
-        /**
-         * Whether to hide the context menu button.
+         * Whether or not the menu is open.
          * @type {boolean}
          */
-        noMenu: {
-          type: Boolean,
-          value: false,
-        },
-
-        /**
-         * Whether to hide the feedback button.
-         * @type {boolean}
-         */
-        noFeedback: {
-          type: Boolean,
-          value: false,
-        },
-
-        /**
-         * Whether to always show the play button.
-         * @type {boolean}
-         */
-        persistentPlayButton: {
+        opened: {
           type: Boolean,
           value: false,
           reflectToAttribute: true,
-        },
-
-        /**
-         * Whether clicks anywhere on the card should trigger a navigation.
-         * @type {boolean}
-         */
-        entireCardNavigates: {
-          type: Boolean,
-          value: false,
-        },
-
-        /**
-         * The handler for focus and blur events, bound to the element's scope.
-         * @private {function(!FocusEvent):void} event
-         */
-        boundFocusBlurHandler_: {
-          type: Function,
-          value: function() {
-            return this.focusBlurHandler_.bind(this);
-          },
-        },
-
-        /**
-         * If true, the element currently has focus.
-         */
-        focused: {
-          type: Boolean,
-          value: false,
-          reflectToAttribute: true,
-          readOnly: true,
-        },
-
-        /**
-         * The handle for canceling the blur async task.
-         * See: https://www.polymer-project.org/1.0/api/#Polymer.Base:method-cancelAsync
-         * @private {?number}
-         */
-        blurHandle_: {
-          type: Number,
-          value: null,
+          observer: 'openedChanged_'
         },
       },
 
+
       /**
-       * Handles focus and blur events from the card's local dom, updating the `focused` attribute
-       * accordingly.
-       * @param {!FocusEvent} event
-       * @private
+       * Set up click and keyboard listeners.
        */
-      focusBlurHandler_: function(event) {
-        if (event.type == 'focus') {
-          this._setFocused(true);
-          if (this.blurHandle_) {
-            this.cancelAsync(this.blurHandle_);
-          }
+      ready: function() {
+         /** @private {!Function} */
+        this.boundClickListener_ = this.handleClick_.bind(this);
+        /** @private {!Function} */
+        this.boundKeydownListener_ = this.handleKeydown_.bind(this);
+      },
+
+
+      /**
+       * Opens the menu and saves elements for focus.
+       */
+      open: function() {
+        this.opened = true;
+        /** @private {!Element} */
+        this.menuButton_= document.activeElement;
+        this.resetFocusable_();
+        this.firstFocusableNode_.focus();
+        this.fire('menu-opened');
+      },
+
+
+      /**
+       * Closes the menu.
+       */
+      close: function() {
+        this.opened = false;
+        this.restoreFocus_();
+        this.fire('menu-closed');
+      },
+
+
+      /**
+       * Toggles the menu.
+       */
+      toggle: function() {
+        this.opened ? this.close() : this.open();
+      },
+
+
+      /**
+       * Handles changes to the menu opened property.
+       * @private {boolean} opened
+       */
+      openedChanged_: function(opened) {
+        if (opened) {
+          document.addEventListener('click', this.boundClickListener_, true);
+          document.addEventListener('keydown', this.boundKeydownListener_, true);
         } else {
-          // We remove the `focused` attribute asynchronously, so that if another element in the
-          // card's local dom gains focus immediately, we can cancel.
-          this.blurHandle_ = this.async(function() {
-            this._setFocused(false);
-          }, 10);
+          document.removeEventListener('click', this.boundClickListener_, true);
+          document.removeEventListener('keydown', this.boundKeydownListener_, true);
+        }
+        this.setAttribute('aria-expanded', opened);
+      },
+
+
+      /**
+       * Captures click events, closing the menu on click outside.
+       * @param {!ClickEvent} event
+       * @private
+       */
+      handleClick_: function(event){
+        if (!Polymer.dom(this).deepContains(event.target) &&
+            Polymer.dom(event).localTarget != this.menuButton_) {
+          this.close();
         }
       },
 
+
       /**
-       * Creates a paper-ripple element, adds it to the DOM, triggers the animation, and
-       * re-dispatches the click event. The ripple is lazily instantiated, since ripples are
-       * expensive to construct and most cards will never be clicked.
-       * @param {!MouseEvent} event
+       * Captures keydown events: tab, shift+tab, and esc.
+       * @param {!KeyboardEvent} event
        * @private
        */
-      createRipple_: function(event) {
-        var localTarget = Polymer.dom(event).localTarget;
-        // Don't ripple for clicks on the play button or the context menu.
-        if (localTarget == this.$.playButton || localTarget == this.$.menuButton ||
-           localTarget == this.$.feedbackButton) {
-          return;
+      handleKeydown_: function(event) {
+        if (Polymer.IronA11yKeysBehavior.keyboardEventMatchesKeys(event, 'tab')) {
+          if(event.shiftKey && document.activeElement == this.firstFocusableNode_) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.lastFocusableNode_.focus();
+          } else if(!event.shiftKey && document.activeElement == this.lastFocusableNode_) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.firstFocusableNode_.focus();
+          }
+        } else if (Polymer.IronA11yKeysBehavior.keyboardEventMatchesKeys(event, 'esc')) {
+          this.close();
         }
+      },
 
-        var ripple = document.createElement('paper-ripple');
-        Polymer.dom(this.$.imageWrapper).appendChild(ripple);
-        ripple.downAction({detail: event});
-        this.async(function() {
-          ripple.upAction();
-          // Re-dispatch the event so it can be handled by higher-level logic.
-          this.$.imageWrapper.dispatchEvent(new MouseEvent(event.type, event));
-        }, 1);
-        event.stopPropagation();
-        this.unlisten(this.$.imageWrapper, 'click', 'createRipple_');
+
+      /**
+       * Returns list of all currently focusable and visible nodes in menu.
+       * @return {!Array<!Element>} focusable nodes
+       * @private
+       */
+      getFocusableNodes_: function() {
+        var selector = 'a[href]:not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])';
+        var focusables = Polymer.dom(this).querySelectorAll(selector);
+        /* If display=none in CSS styling, then element is not focusable */
+        for (var i = focusables.length - 1; i >= 0; i--) {
+          if (window.getComputedStyle(focusables[i]).display === 'none') {
+            focusables.splice(i, 1);
+          }
+        }
+        return focusables;
+      },
+
+
+      /**
+       * Restores focus to the button that triggered the open.
+       * @private
+       */
+      restoreFocus_: function() {
+        var button = this.menuButton_;
+        if (button && Polymer.dom(document.body).deepContains(button)) {
+          button.focus();
+        }
+      },
+
+
+      /**
+       * Reset focusable nodes in list on menu open and on resize.
+       * @private
+       */
+      resetFocusable_: function() {
+        var focusableNodes = this.getFocusableNodes_();
+        /** @private {!Element} */
+        this.firstFocusableNode_ = focusableNodes[0] || this;
+        /** @private {!Element} */
+        this.lastFocusableNode_ = focusableNodes[focusableNodes.length - 1] || this;
       },
     });
 Polymer({
-      is: 'gpm-now-card',
+      is: 'gpm-ifl-button',
 
       properties: {
-        /** @type {string} */
-        logToken: {
-          type: String
-        },
+        /**
+         * The label for the ifl button.
+         */
+        iflLabel: String,
+
+        /**
+         * Whether the button's loading spinner is showing.
+         */
+        loading: Boolean,
       },
     });
 window.MusicBehaviors = window.MusicBehaviors || {};
@@ -22968,93 +23510,388 @@ window.MusicBehaviors = window.MusicBehaviors || {};
   /**
    * @polymerBehavior
    */
-  MusicBehaviors.BackgroundBlendBehavior = {
+  MusicBehaviors.LoadingIndicatorBehavior = {
 
     properties: {
       /**
-       * The url of the background image.
-       * @type {string}
+       * The current loading state of the element.
+       * @type {MusicBehaviors.LoadingIndicatorBehavior.LoadingState}
        */
-      backgroundImage: {
+      loadingState: {
         type: String,
         value: '',
+        reflectToAttribute: true,
+        notify: true,
       },
 
-      /**
-       * The background-color as a CSS <color> string.
-       * @type {string}
-       */
-      backgroundColor: {
-        type: String,
-        value: 'transparent',
+      loading_: {
+        type: Boolean,
+        computed: 'computeLoading_(loadingState)',
       },
 
-      /**
-       * The background-blend-mode as a CSS <blend-mode>.
-       * @type {string}
-       */
-      backgroundBlendMode: {
-        type: String,
-        value: 'multiply',
+      success_: {
+        type: Boolean,
+        computed: 'computeSuccess_(loadingState)',
+      },
+
+      error_: {
+        type: Boolean,
+        computed: 'computeError_(loadingState)',
+      },
+
+      unchanged_: {
+        type: Boolean,
+        computed: 'computeUnchanged_(loadingState)',
       }
     },
 
-    observers: [
-      'updateBackgroundStyles_(backgroundImage, backgroundColor, backgroundBlendMode)'
-    ],
-
     /**
-     * Updates the background styling.
-     * @param {string} backgroundImage
-     * @param {string} backgroundColor
-     * @param {string} backgroundBlendMode
-     * @private
+     * Possible loading states.
+     * @enum {string}
      */
-    updateBackgroundStyles_: function(backgroundImage, backgroundColor, backgroundBlendMode) {
-      this.style.backgroundImage = 'url(' + backgroundImage + ')';
-      this.style.backgroundColor = backgroundColor;
-      this.style.backgroundBlendMode = backgroundBlendMode;
+    LoadingState: {
+      DEFAULT: '',
+      IN_PROGRESS: 'in-progress',
+      SUCCESS: 'success',
+      ERROR: 'error',
+      UNCHANGED: 'unchanged',
     },
+
+    computeLoading_: function(loadingState) {
+      return loadingState == this.LoadingState.IN_PROGRESS;
+    },
+
+    computeSuccess_: function(loadingState) {
+      return loadingState == this.LoadingState.SUCCESS;
+    },
+
+    computeError_: function(loadingState) {
+      return loadingState == this.LoadingState.ERROR;
+    },
+
+    computeUnchanged_: function(loadingState) {
+      return loadingState == this.LoadingState.UNCHANGED;
+    },
+
   };
 Polymer({
-      is: 'gpm-now-card-header',
+      is: 'gpm-loading-indicator',
+
+      hostAttributes: {
+        role: 'alertdialog',
+      },
 
       behaviors: [
-        MusicBehaviors.BackgroundBlendBehavior,
+        MusicBehaviors.LoadingIndicatorBehavior,
+        Polymer.IronA11yKeysBehavior,
       ],
 
       listeners: {
-        'tap': 'handleTap_',
+        'loading-state-changed': 'captureFocus_',
+      },
+
+      keyBindings: {
+        'esc': 'returnFocus_',
       },
 
       properties: {
-        /** @type {string} */
-        moduleToken: {
-          value: String,
-        },
+       /**
+        * Label to show for the success state.
+        */
+        successLabel: String,
 
-        /** @type {string} */
-        headerTitle: {
-          value: String,
-        },
+       /**
+        * Label to show for the error state.
+        */
+        errorLabel: String,
 
-        /** @type {string} */
-        headerSubtitle: {
-          value: String,
-        },
+       /**
+        * Aria label for the component as additional context for the
+        * success label.
+        */
+        successAriaLabel: String,
+
+       /**
+        * Aria label for the component as additional context for the
+        * error label.
+        */
+        errorAriaLabel: String,
       },
 
       /**
-       * @param {!Event} e
+       * Moves focus to the first focusable button in this component.
        * @private
        */
-      handleTap_: function(e) {
-        this.fire('gpm-scroll-to-module', {moduleId: this.moduleToken});
-        e.preventDefault();
-        // TODO(b/23588410): this click event is handled in home/view.js also
-        // for logging purposes, do not stop propagation
+      captureFocus_: function() {
+        if (this.loadingState == this.LoadingState.SUCCESS ||
+            this.loadingState == this.LoadingState.ERROR) {
+          this.async(function() {
+            var buttonToFocus = this.$$('paper-button:not([hidden])');
+            if (buttonToFocus) {
+              this.previouslyFocusedElement_ = document.activeElement;
+              buttonToFocus.focus();
+            }
+          });
+        }
+      },
+
+      /**
+       * Returns focus to whichever element had focus before focus was captured
+       * by this component.
+       * @private
+       */
+      returnFocus_: function() {
+        if (this.previouslyFocusedElement_ &&
+            this.previouslyFocusedElement_.offsetParent) {
+          this.previouslyFocusedElement_.focus();
+        }
+        this.previouslyFocusedElement_ = undefined;
       },
     });
+Polymer({
+
+    is: 'cascaded-animation',
+
+    behaviors: [
+      Polymer.NeonAnimationBehavior
+    ],
+
+    /**
+     * @param {{
+     *   animation: string,
+     *   nodes: !Array<!Element>,
+     *   nodeDelay: (number|undefined),
+     *   timing: (Object|undefined)
+     *  }} config
+     */
+    configure: function(config) {
+      this._animations = [];
+      var nodes = config.nodes;
+      var effects = [];
+      var nodeDelay = config.nodeDelay || 50;
+
+      config.timing = config.timing || {};
+      config.timing.delay = config.timing.delay || 0;
+
+      var oldDelay = config.timing.delay;
+      var abortedConfigure;
+      for (var node, index = 0; node = nodes[index]; index++) {
+        config.timing.delay += nodeDelay;
+        config.node = node;
+
+        var animation = document.createElement(config.animation);
+        if (animation.isNeonAnimation) {
+          var effect = animation.configure(config);
+
+          this._animations.push(animation);
+          effects.push(effect);
+        } else {
+          Polymer.Base._warn(this.is + ':', config.animation, 'not found!');
+          abortedConfigure = true;
+          break;
+        }
+      }
+      config.timing.delay = oldDelay;
+      config.node = null;
+      // if a bad animation was configured, abort config.
+      if (abortedConfigure) {
+        return;
+      }
+
+      this._effect = new GroupEffect(effects);
+      return this._effect;
+    },
+
+    complete: function() {
+      for (var animation, index = 0; animation = this._animations[index]; index++) {
+        animation.complete(animation.config);
+      }
+    }
+
+  });
+Polymer({
+  is: 'gpm-now-card-grid',
+
+  behaviors: [
+    Polymer.IronResizableBehavior,
+  ],
+
+  listeners: {
+    'iron-resize': 'onResize_',
+  },
+
+  properties: {
+    /**
+     * The animation delay between each node for the cascade animation.
+     */
+    cascadeAnimationNodeDelay: {
+      type: Number,
+      value: 75,
+    },
+
+    /**
+     * Aria label for the next page button.
+     */
+    nextPageLabel: String,
+
+    /**
+     * Aria label for the previous page button.
+     */
+    previousPageLabel: String,
+
+    hasPreviousPage: {
+      type: Boolean,
+      reflectToAttribute: true,
+      computed: 'computeHasPreviousPage_(selectedPage_)',
+    },
+
+    hasNextPage: {
+      type: Boolean,
+      reflectToAttribute: true,
+      computed: 'computeHasNextPage_(selectedPage_, totalPages_)',
+    },
+
+    selectedPage_: {
+      type: Number,
+      value: 0,
+    },
+
+    totalPages_: Number,
+  },
+
+  /**
+   * @override
+   */
+  created: function() {
+    this.nowCards_ =
+        Polymer.dom(this).queryDistributedElements('gpm-colored-now-card');
+  },
+
+  /**
+   * @override
+   */
+  ready: function() {
+    this.distributeCards_();
+  },
+
+  computeHasPreviousPage_: function(selectedPage) {
+    return selectedPage != 0;
+  },
+
+  computeHasNextPage_: function(selectedPage, totalPages) {
+    return selectedPage < totalPages - 1;
+  },
+
+  /**
+   * Handle resize events for this element. Note that neon animated pages also
+   * fire a resize event on page switch after animations are done.
+   * @private
+   */
+  onResize_: function() {
+    this.distributeCards_();
+    this.fire('gpm-now-card-grid-updated');
+  },
+
+  /**
+   * Distributes the now cards according to how many cards should be
+   * shown per page. Neon animatable pages will be created on as needed basis.
+   * @private
+   */
+  distributeCards_: function() {
+    if (this.cardsPerPage_ == this.getCardsPerPage_()) {
+      // Don't do anything if we already have the desired distribution.
+      return;
+    }
+    this.cardsPerPage_ = this.getCardsPerPage_();
+
+    Polymer.dom(this.$.pages).innerHTML = '';
+
+    var pages = [];
+
+    this.nowCards_.forEach(function(card, index) {
+      var targetPageIndex = Math.floor(index / this.cardsPerPage_);
+      if (!pages[targetPageIndex]) {
+        pages.push(document.createElement('neon-animatable'));
+      }
+      Polymer.dom(pages[targetPageIndex]).appendChild(card);
+    }.bind(this));
+
+    pages.forEach(function(page) {
+      Polymer.dom(this.$.pages).appendChild(page);
+    }.bind(this));
+
+    this.totalPages_ = pages.length;
+    this.selectedPage_ = Math.min(this.selectedPage_, this.totalPages_ - 1);
+
+    // Set animation config after appending pages to avoid animation
+    // during resize.
+    this.async(function() {
+      pages.forEach(function(page) {
+        page.animationConfig = this.getAnimationConfigForPage_(page);
+      }.bind(this));
+      // Resetting the selected page's opacity works around a bug with
+      // neon-animated-pages where content would sometimes disappear on resize.
+      pages[this.selectedPage_].style.opacity = '';
+    }.bind(this));
+  },
+
+  /**
+   * The amount of now cards that should be shown per page based on the
+   * current viewport width.
+   * @return {number}
+   * @private
+   */
+  getCardsPerPage_: function() {
+    var viewportWidth = window.innerWidth;
+
+    if (viewportWidth < 1250) {
+      return 4;
+    } else if (viewportWidth < 1850) {
+      return 6;
+    } else {
+      return 8;
+    }
+  },
+
+  /**
+   * Returns the animation configuration for the provided page.
+   * @param {!Element} page
+   * @return {!Object}
+   * @private
+   */
+  getAnimationConfigForPage_: function(page) {
+    return {
+      entry: {
+        name: 'cascaded-animation',
+        animation: 'fade-in-animation',
+        nodes: Polymer.dom(page).querySelectorAll('gpm-colored-now-card'),
+        nodeDelay: this.cascadeAnimationNodeDelay,
+        timing: {
+          delay: 200,
+        }
+      },
+      exit: {
+        name: 'fade-out-animation',
+        node: page,
+      },
+    };
+  },
+
+  /**
+   * Click handler for the next and previous page buttons.
+   * @param {!Event} event
+   * @private
+   */
+  buttonClickHandler_: function(event) {
+    var localTarget = Polymer.dom(event).localTarget;
+    if (localTarget.id == 'prev') {
+      this.selectedPage_ = Math.max(this.selectedPage_ - 1, 0);
+    } else {
+      this.selectedPage_ = Math.min(
+          this.selectedPage_ + 1, this.totalPages_ - 1);
+    }
+  },
+});
 Polymer({
       is: 'gpm-viewport-size-observer',
 
@@ -23073,7 +23910,15 @@ Polymer({
        */
       viewportSizeChanged_: function(isNewViewportSize) {
         if (isNewViewportSize) {
+          // Calling Polymer.updateStyles() is necessary because of
+          // https://github.com/Polymer/polymer/issues/2149.
+          // Can be removed once we no longer use the css custom properties
+          // shim that is shipped with Polymer.
+          // Call before firing the change event so that listeners act upon
+          // updated styles.
           Polymer.updateStyles();
+
+          this.fire('gpm-content-breakpoints-changed');
         }
       },
     });
@@ -23211,6 +24056,165 @@ Polymer({
       trapFocus_: function(e) {
         e.preventDefault();
         e.stopPropagation();
+      },
+    });
+Polymer({
+      is: 'sj-card',
+
+      behaviors: [
+        MusicBehaviors.FocusableBehavior,
+        MusicBehaviors.LoggableBehavior,
+        MusicBehaviors.PlayableBehavior,
+      ],
+
+      listeners: {
+        'focusCapture.click': 'focusCaptureClickHandler_',
+      },
+
+      /**
+       * @override
+       */
+      created: function() {
+        this.boundLazyInstantiatePlayButton_ = this.lazyInstantiatePlayButton_.bind(this);
+      },
+
+      /**
+       * @override
+       */
+      attached: function() {
+        this.addEventListener(
+            'mouseover', this.boundLazyInstantiatePlayButton_);
+        this.listen(this, 'focused-changed', 'boundLazyInstantiatePlayButton_');
+        if (!this.noInk) {
+          this.listen(this.$.imageWrapper, 'click', 'createRipple_');
+        }
+      },
+
+      /**
+       * @override
+       */
+      detached: function() {
+        this.removeEventListener(
+            'mouseover', this.boundLazyInstantiatePlayButton_);
+        this.unlisten(this, 'focused-changed', 'boundLazyInstantiatePlayButton_');
+        this.unlisten(this.$.imageWrapper, 'click', 'createRipple_');
+      },
+
+      properties: {
+        /**
+         * Text that should be overlaid on the card image.
+         * @type {string}
+         */
+        overlayText: {
+          type: String,
+        },
+
+        /**
+         * The label for the menu button.
+         * @type {string}
+         */
+        menuLabel: {
+          type: String,
+        },
+
+        /**
+         * The aspect ratio of the card.
+         * @type {string}
+         */
+        cardAspectRatio: {
+          type: String,
+          reflectToAttribute: true,
+        },
+
+        /**
+         * If true, clicking the image will not produce a ripple effect.
+         * @type {boolean}
+         */
+        noInk: {
+          type: Boolean,
+          value: false,
+        },
+
+        /**
+         * Whether the play button for this element has been instantiated.
+         * @private {boolean}
+         */
+        playButtonInstantiated_: {
+          type: Boolean,
+          value: false,
+        },
+
+        /**
+         * Computed aria label of the play button.
+         * @private {string}
+         */
+        playButtonAriaLabel_: {
+          type: String,
+        },
+      },
+
+      /**
+       * Returns the title of this card component.
+       * @return {string}
+       */
+      get title() {
+        var titleElement = Polymer.dom(this.$.details)
+            .queryDistributedElements('.card-title')[0];
+        return titleElement ? titleElement.textContent : '';
+      },
+
+      /**
+       * Creates a paper-ripple element, adds it to the DOM, triggers the animation, and
+       * re-dispatches the click event. The ripple is lazily instantiated, since ripples are
+       * expensive to construct and most cards will never be clicked.
+       * @param {!MouseEvent} event
+       * @private
+       */
+      createRipple_: function(event) {
+        var localTarget = Polymer.dom(event).localTarget;
+        // Don't ripple for clicks on the play button or the context menu.
+        // Don't use automatic node finding for play button since it's
+        // dynamically created
+        if (localTarget == this.$$('#playButton') || localTarget == this.$.menuButton) {
+          return;
+        }
+
+        var ripple = document.createElement('paper-ripple');
+        Polymer.dom(this.$.imageWrapper).appendChild(ripple);
+        ripple.downAction({detail: event});
+        this.async(function() {
+          ripple.upAction();
+          // Re-dispatch the event so it can be handled by higher-level logic.
+          this.$.imageWrapper.dispatchEvent(new MouseEvent(event.type, event));
+        }, 1);
+        event.stopPropagation();
+        this.unlisten(this.$.imageWrapper, 'click', 'createRipple_');
+      },
+
+      /**
+       * Play button is lazily instantiated on hover and focus since it is
+       * expensive to construct.
+       * @private
+       */
+      lazyInstantiatePlayButton_: function() {
+        if (this.playButtonInstantiated_) {
+          return;
+        }
+        this.playButtonInstantiated_ = true;
+        this.removeEventListener('mouseover', this.boundLazyInstantiatePlayButton_);
+        this.unlisten(this, 'focused-changed', 'boundLazyInstantiatePlayButton_');
+      },
+
+      /**
+       * Forwards the event to the play button to toggle playback. This is used
+       * for desired a11y behavior (have card be first focusable element).
+       * @param {!MouseEvent} event
+       * @private
+       */
+      focusCaptureClickHandler_: function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.$$('#playButton').dispatchEvent(new MouseEvent(event.type, event));
       },
     });
 /**
@@ -23426,6 +24430,22 @@ Polymer({
 Polymer({
       is: 'sj-page-indicator',
 
+      hostAttributes: {
+        role: 'tablist',
+        'aria-orientation': 'vertical',
+        tabindex: 0
+      },
+
+      behaviors: [
+        Polymer.IronA11yKeysBehavior,
+      ],
+
+      keyBindings: {
+        'down': 'selectNext_',
+        'up': 'selectPrevious_',
+        'tab': 'tabOut_',
+      },
+
       properties: {
         /**
          * The index of the currently selected page.
@@ -23433,8 +24453,127 @@ Polymer({
          */
         selected: {
           type: Number,
-          value: 0
+          value: 0,
+          observer: 'selectedChanged_',
         },
+
+        /**
+         * The list of pages to create tabs for.
+         * @private {!Array<{{
+         *     titleText: string,
+         *     moduleId: string,
+         *     icon: string,
+         *     modulePaginationActiveColorId: number,
+         *     modulePaginationInactiveColorId: number}}>}
+         */
+        pages: {
+          type: Array,
+          value: []
+        },
+
+        /**
+         * Overrides the default value from IronA11yKeysBehavior.
+         * @type {boolean}
+         */
+        stopKeyboardEventPropagation: {
+          type: Boolean,
+          value: true,
+        },
+      },
+
+      /**
+       * Computes the id for a tab from its index.
+       * @param {number} index
+       * @return {string}
+       * @private
+       */
+      computeTabId_: function(index) {
+        return 'sj-page-tab-' + index;
+      },
+
+      /**
+       * Handles tabbing out of the component.
+       * @param {!Event}
+       * @private
+       */
+      tabOut_: function(e) {
+        // Allow shift+tab to traverse backwards.
+        if (!e.detail.keyboardEvent.shiftKey) {
+          // Stop the event if the tab panel was successfully focused.
+          if (this.focusSelectedTabPanel()) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      },
+
+      /**
+       * Focuses the first focusable element in the selected tab panel.
+       * @return {boolean} Whether the panel was successfully focused.
+       * @private
+       */
+      focusSelectedTabPanel: function() {
+        var selectedTab = this.$.selector.selectedItem;
+        var selectedTabPanel = document.getElementById(selectedTab.getAttribute('aria-controls'));
+
+        if (selectedTabPanel) {
+          var tabPanelFirstFocusableElement = selectedTabPanel.querySelector(
+              'button, a[href]:not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])');
+          if (tabPanelFirstFocusableElement) {
+            tabPanelFirstFocusableElement.focus();
+            return true;
+          }
+        }
+        return false;
+      },
+
+      /**
+       * Handles down arrow presses, selecting the next tab.
+       * @param {!Event}
+       * @private
+       */
+      selectNext_: function(e) {
+        this.$.selector.selectNext();
+        this.fire('gpm-keyboard-select');
+        e.preventDefault();
+      },
+
+      /**
+       * Handles up arrow presses, selecting the previous tab.
+       * @param {!Event}
+       * @private
+       */
+      selectPrevious_: function(e) {
+        this.$.selector.selectPrevious();
+        this.fire('gpm-keyboard-select');
+        e.preventDefault();
+      },
+
+      /**
+       * Handles changes to the selected tab.
+       * @param {number} selected
+       * @private
+       */
+      selectedChanged_: function(selected) {
+        var tabs = this.$.selector.items;
+        tabs.forEach(function(tab, index) {
+          tab.setAttribute('aria-selected', index == selected);
+        });
+        this.setAttribute('aria-activedescendant', this.computeTabId_(selected));
+      },
+
+      /**
+       * @param {number} selected
+       * @param {!Object} page
+       * @param {number} index
+       * @private
+       */
+      getPageIndicatorClass_: function(selected, page, index) {
+        var prefix = 'home-palette-id-';
+        if (selected == index) {
+          return prefix + page.modulePaginationActiveColorId;
+        }
+        return prefix + page.modulePaginationInactiveColorId;
       },
     });
 Polymer({
@@ -23448,22 +24587,24 @@ Polymer({
       properties: {
         /**
          * The index of the selected module.
+         * This is manually reflected to the corresponding attribute to keep
+         * all color updates (background, gradient, palette) in sync.
          * @type {number}
          */
         selected: {
           type: Number,
           value: 0,
-          reflectToAttribute: true,
         },
 
         /**
-         * @type{!Array<{titleText: string,
+         * @type {!Array<{{
+         *     titleText: string,
+         *     moduleId: string,
+         *     icon: string,
          *     modulePaginationActiveColorId: number,
-         *     modulePaginationInactiveColorId: number}>}
+         *     modulePaginationInactiveColorId: number}}>}
          */
-        pageIndicators: {
-          type: Array,
-        },
+        pageIndicators: Array,
 
         /**
          * @type {!Array<!Array<{colorId: number, colorString: string}>>}
@@ -23472,20 +24613,34 @@ Polymer({
           type: Array,
           observer: 'palettesChanged_'
         },
+
+        /**
+         * The label for the page indicator widget.
+         * @type: {string}
+         */
+        pageIndicatorLabel: String
       },
 
       attached: function() {
         this.moduleObserver_ =
           Polymer.dom(this.$.modules).observeNodes(this.modulesChanged_.bind(this));
         this.listen(document, 'gpm-scroll-to-module', 'handleScrollToModule_');
+        // Listen to content breakpoint changes rather than parent resize
+        this.listen(document, 'gpm-content-breakpoints-changed',
+            'handleContentBreakpointsChanged_');
+        this._parentResizable.stopResizeNotificationsFor(this);
       },
 
       detached: function() {
         Polymer.dom(this.$.modules).unobserveNodes(this.moduleObserver_);
         this.unlisten(document, 'gpm-scroll-to-module', 'handleScrollToModule_');
+        this.unlisten(document, 'gpm-content-breakpoints-changed',
+            'handleContentBreakpointsChanged_');
+        this.throttledCheckThresholds_.cancel();
+        this.cancelDebouncer('updateBackground_');
       },
 
-      ready: function() {
+      created: function() {
         var styleTag = document.getElementById('home-styles');
 
         if (!styleTag) {
@@ -23494,55 +24649,72 @@ Polymer({
           document.head.appendChild(styleTag);
         }
 
-        /** @private {!CSSStyleSheet} */
+        /** @private @const {!CSSStyleSheet} */
         this.cssom_ = styleTag.sheet;
 
-        /** @private {number} */
-        this.transitionFudgeMillis_ = 100;
+        /** @private @const {number} */
+        this.SCROLL_THROTTLE_MILLIS_ = 50;
+
+        /** @private @const {!Function} */
+        this.throttledCheckThresholds_ = this.throttle_(
+            this.checkThresholds_.bind(this, true /* opt_skipBackgroundUpdate */),
+            this.SCROLL_THROTTLE_MILLIS_);
       },
 
       listeners: {
-        'iron-resize': 'onResize_',
-        'pageIndicator.click': 'smoothScroll_'
+        'pageIndicator.mousedown': 'smoothScroll_',
+        'pageIndicator.gpm-keyboard-select': 'instantScroll_',
+      },
+
+      /**
+       * Scrolls to the module at the provided index.
+       * Will animate the scroll if the document is currently showing.
+       * @param {number} index
+       * @param {function():?=} opt_resolver Resolver function to call when
+       *     scrolling is done.
+       */
+      scrollToModuleByIndex: function(index, opt_resolver) {
+        this.$.pageIndicator.selected = index;
+        if (document.hidden) {
+          this.instantScroll_();
+          if (typeof opt_resolver == 'function') {
+            opt_resolver();
+          }
+        } else {
+          return this.smoothScroll_(opt_resolver);
+        }
       },
 
       /**
        * @override
        */
       _scrollTargetChanged: function(scrollTarget, isAttached) {
-        this.updateBreakpoints_();
-        Polymer.IronScrollTargetBehavior._scrollTargetChanged.call(this, scrollTarget, isAttached);
+        // Schedule DOM reads until after call stack has unwound to avoid
+        // layout thrashing
+        this.async(function() {
+          this.updateScrollBreakpoints_();
+          Polymer.IronScrollTargetBehavior._scrollTargetChanged.call(this, scrollTarget, isAttached);
+        }, 1 /* wait */);
       },
 
       /**
-       * Handles resize events.
+       * Handles content breakpoint change events.
        * @private
        */
-      onResize_: function() {
-        this.debounce('_onResize', function() {
-          this.updateBreakpoints_();
-          this.checkThesholds_();
-        }, 20 /* wait */);
+      handleContentBreakpointsChanged_: function() {
+        this.updateScrollBreakpoints_();
+        this.checkThresholds_();
+        this.notifyResize();
       },
 
       /**
        * Calculates scroll breakpoints given the current set of modules.
+       * @private
        */
-      updateBreakpoints_: function() {
-        var modules = this.getModules_();
-        var modulesTops = modules.map(function(module) {
+      updateScrollBreakpoints_: function() {
+        this.scrollBreakpoints_ = this.getModules_().map(function(module) {
           return module.offsetTop;
         });
-        // 1/2 the height of the main page content.
-        var peekingThreshold = (window.innerHeight - 64 - 90) * 0.5;
-        this.breakpoints_ = modulesTops.map(function(moduleTop) {
-          return moduleTop + peekingThreshold;
-        }).splice(1);
-
-        if (modules.length > 1) {
-          var lastModule = modules[modules.length - 1];
-          this.breakpoints_.push(this.scrollTarget.scrollHeight);
-        }
       },
 
       /**
@@ -23552,31 +24724,38 @@ Polymer({
         if (this.animating_) {
           return;
         }
-        if (!this.isDebouncerActive('checkThesholds_')) {
-          this.debounce('checkThesholds_', function() {
-            this.checkThesholds_();
-          }, 50 /* wait */);
-        }
+        this.throttledCheckThresholds_();
+
+        // Debounce background update until scrolling ends for smoother scrolling.
+        this.debounce('updateBackground_', function() {
+          this.throttledCheckThresholds_.flush();
+          this.updateBackground_(this.getModules_()[this.selected]);
+        }, this.SCROLL_THROTTLE_MILLIS_);
       },
 
       /**
        * Checks the scroll thresholds to update the currently selected module.
+       * @param {boolean=} opt_skipBackgroundUpdate Whether to skip updating the
+       *     background according to the selected module.
        * @private
        */
-      checkThesholds_: function() {
+      checkThresholds_: function(opt_skipBackgroundUpdate) {
         var scrollTop = this.scrollTarget.scrollTop;
-        var contentHeight = window.innerHeight - 64 - 90;
-        var visibleBottom = scrollTop + contentHeight;
         var selected = 0;
-        for (var i = 0; i < this.breakpoints_.length; i++) {
-          if (visibleBottom <= this.breakpoints_[i]) {
+        var minDelta = Infinity;
+        for (var i = 0; i < this.scrollBreakpoints_.length; i++) {
+          var delta = Math.abs(scrollTop - this.scrollBreakpoints_[i]);
+          if (delta < minDelta) {
+            minDelta = delta;
             selected = i;
-            break;
           }
         }
+
         if (this.selected != selected) {
           this.selected = selected;
-          this.updateBackground_(this.getModules_()[selected]);
+          if (!opt_skipBackgroundUpdate) {
+            this.updateBackground_(this.getModules_()[selected]);
+          }
         }
       },
 
@@ -23601,9 +24780,11 @@ Polymer({
 
       /**
        * Initiates a smooth scroll animation to the module indicated by the selected page.
+       * @param {function():?=} opt_resolver Resolver function to call when
+       *     scrolling is done.
        * @private
        */
-      smoothScroll_: function() {
+      smoothScroll_: function(opt_resolver) {
         this.animating_ = true;
         var selectedModule = this.getModules_()[this.$.pageIndicator.selected];
         var targetScrollTop = selectedModule.offsetTop;
@@ -23615,15 +24796,31 @@ Polymer({
         var effect = new KeyframeEffect(
             this.scrollTarget, [], {duration: duration, easing: 'ease'});
         effect.onsample = function(timeFraction, effect, animation) {
-          timeFraction = timeFraction || 1;
+          if (timeFraction == null) {
+            timeFraction = 1;
+          }
           effect.target.scrollTop = startingScrollTop + (timeFraction * delta);
         };
 
         var animation = document.timeline.play(effect);
         animation.onfinish = function() {
           this.animating_ = false;
-          this.checkThesholds_();
+          this.checkThresholds_();
+          this.$.pageIndicator.focusSelectedTabPanel();
+          if (typeof opt_resolver == 'function') {
+            // Resolve asynchonously to give browser time to render final state.
+            this.async(opt_resolver, 1);
+          }
         }.bind(this);
+      },
+
+      /**
+       * Scrolls to the currently selected module without an animation.
+       * @private
+       */
+      instantScroll_: function() {
+        var selectedModule = this.getModules_()[this.$.pageIndicator.selected];
+        this.scrollTarget.scrollTop = selectedModule.offsetTop;
       },
 
       /**
@@ -23632,9 +24829,7 @@ Polymer({
        * @private
        */
       getModules_: function() {
-        return this.getContentChildNodes('#modules').filter(function(module) {
-          return !module.classList.contains('mini');
-        });
+        return this.getContentChildNodes('#modules');
       },
 
       /**
@@ -23643,30 +24838,99 @@ Polymer({
        * @private
        */
       updateBackground_: function(module) {
-        // Update the background color.
-        this.$.backgroundColor.style.backgroundColor = module.backgroundColor;
-        // Update the gradient.
-        this.startTimestamp_ = performance.now();
-        requestAnimationFrame(this.updateGradient_.bind(this));
-        // Update the selected background image.
-        Polymer.dom(this.$.backgroundImages).children.forEach(function(backgroundImage, index) {
+        // Manually reflect to attribute to keep background and palette update
+        // in sync.
+        this.setAttribute('selected', this.selected);
+        this.updateBackgroundImage_();
+
+        var currentBackgroundColor =
+          this.$.backgroundColor.style.backgroundColor;
+        if (!currentBackgroundColor) {
+          this.setBackgroundColor_(module.backgroundColor);
+          return;
+        }
+
+        var currentRgba = this.parseRgba_(currentBackgroundColor);
+        var moduleRgba = this.parseRgba_(module.backgroundColor);
+
+        // Keep duration in sync with background image opacity change duration
+        var effect = new KeyframeEffect(
+            this.$.backgroundContainer, [], {duration: 500, easing: 'ease'});
+
+        effect.onsample = function(timeFraction, effect, animation) {
+          if (timeFraction == null) {
+            timeFraction = 1;
+          }
+          var interpolatedRgba = [];
+          for (var i = 0; i < 3; ++i) {
+            interpolatedRgba[i] = Math.floor(currentRgba[i] +
+                ((moduleRgba[i] - currentRgba[i]) * timeFraction));
+          }
+          this.setBackgroundColor_(
+            this.composeRgba_(interpolatedRgba, 1 /* alpha */));
+        }.bind(this);
+
+        if (this.backgroundAnimation_) {
+          this.backgroundAnimation_.cancel();
+        }
+        this.backgroundAnimation_ = document.timeline.play(effect);
+        this.backgroundAnimation_.onfinish = function() {
+          this.setBackgroundColor_(module.backgroundColor);
+          this.backgroundAnimation_ = null;
+        }.bind(this);
+
+      },
+
+      /**
+       * Updates the background image based on the currently selected module.
+       * @private
+       */
+      updateBackgroundImage_: function() {
+        Polymer.dom(this.$.backgroundImages).children.forEach(
+            function(backgroundImage, index) {
           this.toggleClass('selected', index == this.selected, backgroundImage);
         }, this);
       },
 
       /**
-       * Updates the color of the background gradient to match the current background color.
-       * @param {number} timestamp
+       * Sets the background color to the provided value. Also updates the
+       * gradient that overlays the image to create a smooth transition
+       * between image and background color.
+       * @param {string} color
        * @private
        */
-      updateGradient_: function(timestamp) {
-        var backgroundColor = window.getComputedStyle(this.$.backgroundColor).backgroundColor;
+      setBackgroundColor_: function(color) {
+        var parsed = this.parseRgba_(color);
+        var colorAlpha1 = this.composeRgba_(parsed, 1 /* alpha */);
+        var colorAlpha0 = this.composeRgba_(parsed, 0 /* alpha */);
+        this.$.backgroundColor.style.backgroundColor = colorAlpha1;
         this.$.gradient.style.background =
-            'linear-gradient(to top, ' + backgroundColor + ', transparent), ' +
-            'linear-gradient(to right, ' + backgroundColor + ', transparent)';
-        if ((timestamp - this.startTimestamp_) <= 500 + this.transitionFudgeMillis_) {
-          requestAnimationFrame(this.updateGradient_.bind(this));
-        }
+            'linear-gradient(to top, ' + colorAlpha1 + ', ' + colorAlpha0 + '), ' +
+            'linear-gradient(to right, ' + colorAlpha1 + ', ' + colorAlpha0 + ')';
+      },
+
+      /**
+       * Parses an rgba value into its individual parts.
+       * @param {string} color
+       * @return {!Array<int>}
+       * @private
+       */
+      parseRgba_: function(color) {
+        return color.split('(')[1].split(')')[0].split(',').map(function(val) {
+          return parseInt(val);
+        });
+      },
+
+      /**
+       * Composes an rgba value out of its individual parts.
+       * @param {!Array<number>} fractions
+       * @param {number} alpha
+       * @return {string}
+       * @private
+       */
+      composeRgba_: function(fractions, alpha) {
+        fractions = fractions.slice(0, 3);
+        return 'rgba(' + fractions.join(',') + ',' + alpha + ')';
       },
 
       /**
@@ -23696,26 +24960,49 @@ Polymer({
        */
       handleScrollToModule_: function(e) {
         var modules = this.getModules_();
-        modules.forEach(function(module, index) {
-          if (module.dataset.moduleToken == e.detail.moduleId) {
-            this.$.pageIndicator.selected = index;
-            this.smoothScroll_();
-          }
-        }, this);
+        var index = modules.findIndex(function(module) {
+          return module.moduleToken == e.detail.moduleId;
+        });
+        if (index != -1) {
+          this.scrollToModuleByIndex(index);
+        }
       },
 
       /**
-       * @param {number} selected
-       * @param {!Object} pageIndicator
-       * @param {number} index
+       * Returns a throttled version of the passed function. Using a combination
+       * of Polymer's `debounce` and `isDebouncerActive` does not work
+       * reliably, therefore this custom implementation.
+       * @param {!Function} listener The function to debounce with context and
+       *     arguments bound to it.
+       * @param {number} wait
+       * @return {!Function}
        * @private
        */
-      getPageIndicatorClass_: function(selected, pageIndicator, index) {
-        var prefix = 'home-palette-id-';
-        if (selected == index) {
-          return prefix + pageIndicator.modulePaginationActiveColorId;
-        }
-        return prefix + pageIndicator.modulePaginationInactiveColorId;
+      throttle_: function(listener, wait) {
+        var timeoutId;
+        var lastInvocation = 0;
+
+        var throttled = function() {
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(listener, wait);
+
+          var now = new Date().getTime();
+          if (lastInvocation + wait < now) {
+            lastInvocation = now;
+            listener();
+          }
+        };
+
+        throttled.flush = function() {
+          clearTimeout(timeoutId);
+          listener();
+        };
+
+        throttled.cancel = function() {
+          clearTimeout(timeoutId);
+        };
+
+        return throttled;
       },
 
     });
@@ -23791,10 +25078,20 @@ Polymer({
       is: 'sj-playable-item',
 
       behaviors: [
+        MusicBehaviors.LoggableBehavior,
         MusicBehaviors.PlayableBehavior,
       ],
 
       properties: {
+
+        /**
+         * The id of the item that this component represents.
+         * @type {string}
+         */
+        itemId: {
+          type: String,
+        },
+
         /**
          * The url of the image.
          * @type {string}
@@ -23811,54 +25108,18 @@ Polymer({
           type: String,
         },
 
-        /**
-         * The background color of the play button.
-         * @type {string}
-         */
-        playButtonColor: {
-          type: String,
-        },
-
-        /**
-         * The icon color of the play button.
-         * @type {string}
-         */
-        playButtonIconColor: {
-          type: String
-        },
-
-        /**
-         * The loading spinner color.
-         * @type {string}
-         */
-        playButtonLoadingColor: {
-          type: String
-        },
-
-        /**
-         * The play button pulse color.
-         * @type {string}
-         */
-        playButtonPulseColor: {
-          type: String
-        },
-
-        /**
-         * The label for the play button.
-         * @type {string}
-         */
-        playLabel: {
-          type: String
-        },
-
-        /**
-         * The label for the pause button.
-         * @type {string}
-         */
-        pauseLabel: {
-          type: String
-        },
       },
+
+      /**
+       * Returns the title of this item.
+       * @return {string}
+       */
+      get title() {
+        var titleElement = Polymer.dom(this.$.details)
+            .queryDistributedElements('.item-title')[0];
+        return titleElement ? titleElement.textContent : '';
+      },
+
     });
 Polymer({
       is: 'sj-playable-list',
@@ -23962,16 +25223,6 @@ Polymer({
           value: false,
           reflectToAttribute: true,
           observer: 'openedChanged_'
-        },
-
-        /**
-         * Whether the drawer is currently peeking.
-         * @type {boolean}
-         */
-        peeking: {
-          type: Boolean,
-          value: false,
-          reflectToAttribute: true,
         },
 
         /**
@@ -24102,6 +25353,14 @@ Polymer({
 Polymer({
       is: 'sj-scrolling-module',
 
+      hostAttributes: {
+        role: 'tabpanel',
+      },
+
+      behaviors: [
+        MusicBehaviors.LoggableBehavior,
+      ],
+
       properties: {
         /**
          * The background image for this module.
@@ -24121,160 +25380,80 @@ Polymer({
       }
     });
 Polymer({
-
-    is: 'cascaded-animation',
-
-    behaviors: [
-      Polymer.NeonAnimationBehavior
-    ],
-
-    /**
-     * @param {{
-     *   animation: string,
-     *   nodes: !Array<!Element>,
-     *   nodeDelay: (number|undefined),
-     *   timing: (Object|undefined)
-     *  }} config
-     */
-    configure: function(config) {
-      this._animations = [];
-      var nodes = config.nodes;
-      var effects = [];
-      var nodeDelay = config.nodeDelay || 50;
-
-      config.timing = config.timing || {};
-      config.timing.delay = config.timing.delay || 0;
-
-      var oldDelay = config.timing.delay;
-      var abortedConfigure;
-      for (var node, index = 0; node = nodes[index]; index++) {
-        config.timing.delay += nodeDelay;
-        config.node = node;
-
-        var animation = document.createElement(config.animation);
-        if (animation.isNeonAnimation) {
-          var effect = animation.configure(config);
-
-          this._animations.push(animation);
-          effects.push(effect);
-        } else {
-          Polymer.Base._warn(this.is + ':', config.animation, 'not found!');
-          abortedConfigure = true;
-          break;
-        }
-      }
-      config.timing.delay = oldDelay;
-      config.node = null;
-      // if a bad animation was configured, abort config.
-      if (abortedConfigure) {
-        return;
-      }
-
-      this._effect = new GroupEffect(effects);
-      return this._effect;
-    },
-
-    complete: function() {
-      for (var animation, index = 0; animation = this._animations[index]; index++) {
-        animation.complete(animation.config);
-      }
-    }
-
-  });
-Polymer({
     is: 'sj-entity-suggestion',
 
     listeners: {
-      'click': 'playEntity_'
+      'click': 'clickHandler_',
     },
 
     hostAttributes: {
-      'role': 'option'
+      'role': 'option',
     },
 
     properties: {
       /**
-       * Whether the play button should be displayed for the given entity.
-       * @type {boolean}
+       * @type {{
+       *     title: string,
+       *     subtitle: string,
+       *     entityType: number,
+       *     image: string
+       *     playable: boolean,
+       *     playLabel: string,
+       *     entityId: string,
+       *     albumMatchedId: string,
+       *     radioSeedId: ?Object,
+       * }}
        */
-      playable: {
-        type: Boolean,
-        value: false
-      },
+      entity: Object,
 
       /**
        * Position of suggestion in the search suggestions dropdown.
-       * @type {number}
        */
-      position: {
-        type: Number,
-      },
+      position: Number,
 
       /**
-       * Type of entity suggestion
-       * @type {number}
+       * The aria label for playing the entity.
        */
-      entityType: {
-        type: Number,
-      },
+      playEntityLabel: String,
 
       /**
        * Category of suggestion
-       * @type {number}
        */
       suggestionCategory: {
         type: Number,
         value: 2 // Entity suggestion default
       },
-
-      /**
-       * Unique ID of entity suggestion
-       * @type {string}
-       */
-      entityId: {
-        type: String,
-        value: ''
-      },
-
-      /**
-       * Track-specific playback information.
-       * @type {string}
-       */
-      albumMatchedId: {
-        type: String,
-        value: ''
-      },
-
-      /**
-       * Station-specific playback information.
-       * @type {Object}
-       */
-      radioSeedId: {
-        type: Object,
-      },
-
-      /**
-       * Aria label for play button.
-       * @type {string}
-       */
-      playLabel: {
-        type: String,
-      },
     },
 
     /**
-     * Fires 'play-entity' in response to a click on an entity suggestion play button.
+     * Handles clicks on the suggestion.
      * @param {!MouseEvent} event
      * @private
      */
-    playEntity_: function(event) {
-      if (Polymer.dom(event).localTarget.id == 'playButton') {
-        this.fire('play-entity', {
-          entity: this
-        });
+    clickHandler_: function(event) {
+      var playButton = this.$$('#playButton');
+      if (playButton && Polymer.dom(playButton).deepContains(Polymer.dom(event).rootTarget)) {
+        this.playEntity();
+      } else {
+        this.navigateToEntity();
       }
-      this.fire('navigate-to-entity', {
-        entity: this
+    },
+
+    /**
+     * Fires an event to request playback of the specified entity.
+     */
+    playEntity: function() {
+      this.fire('gpm-play-entity', {
+        entity: this.entity,
+      });
+    },
+
+    /**
+     * Fires an event to request navigation to the specified entity.
+     */
+    navigateToEntity: function() {
+      this.fire('gpm-navigate-to-entity', {
+        entity: this.entity,
       });
     },
   });
@@ -24332,8 +25511,8 @@ Polymer({
   listeners: {
     'input.focus': 'onFocus_',
     'input.input': 'onInputChange_',
-    'querySuggestionList.click': 'onSuggestionClick_',
-    'clearButton.click': 'clear'
+    'suggestionList.click': 'onSuggestionClick_',
+    'clearButton.click': 'onClearButtonClick_'
   },
 
   keyBindings: {
@@ -24387,15 +25566,11 @@ Polymer({
       reflectToAttribute: true
     },
 
-    placeholder: {
-      type: String,
-      value: '',
-    },
+    placeholder: String,
 
-    clearSearchLabel: {
-      type: String,
-      value: '',
-    },
+    clearSearchLabel: String,
+
+    playEntityLabel: String,
 
     /**
      * The list of entity suggestions to display in the search dropdown.
@@ -24478,7 +25653,7 @@ Polymer({
    * @return {number}
    * @private
    */
-  computeSuggestIndex_: function(index) {
+  computeQuerySuggestIndex_: function(index) {
     return this.entitySuggestions.length + index;
   },
 
@@ -24499,13 +25674,24 @@ Polymer({
   },
 
   /**
-   * Computes ids for suggested queries.
+   * Computes ids for search suggestions.
    * @param {number} index
    * @return {string}
    * @private
    */
   computeSuggestionId_: function(index) {
     return 'suggestion-' + index;
+  },
+
+  /**
+   * Computes ids for query suggestions, including an offset to account for
+   * any entity suggestions.Query
+   * @param {number} index
+   * @return {string}
+   * @private
+   */
+  computeQuerySuggestionId_: function(index) {
+    return this.computeSuggestionId_(this.computeQuerySuggestIndex_(index));
   },
 
   /**
@@ -24583,16 +25769,11 @@ Polymer({
       if (this.opened) {
         this.calculateHeight_();
       }
-      this.suggestionElements_ = Polymer.dom(this.$.entitySuggestionList)
-                                     .querySelectorAll('sj-entity-suggestion');
-      this.suggestionElements_ = this.suggestionElements_.concat(
-          Polymer.dom(this.$.querySuggestionList)
-              .querySelectorAll('sj-search-suggestion'));
+      this.suggestionElements_ = Polymer.dom(this.$.suggestionList)
+          .querySelectorAll('sj-entity-suggestion, sj-search-suggestion');
       this.animationConfig.suggestions.nodes = this.suggestionElements_;
       this.setAttribute('num-suggestions',
           this.entitySuggestions.length + this.suggestions.length);
-      this.setAttribute(
-          'num-entity-suggestions', this.entitySuggestions.length);
     }.bind(this));
   },
 
@@ -24606,7 +25787,7 @@ Polymer({
     if (this.entitySuggestions.length > 0) {
       height += 15; // Height of divider between entity and query suggests.
     }
-    this.$.suggestContainer.style.height = height + 'px';
+    this.$.suggestionList.style.height = height + 'px';
   },
 
   /**
@@ -24649,12 +25830,15 @@ Polymer({
    */
   onSuggestionClick_: function(event) {
     var localTarget = Polymer.dom(event).localTarget;
-    this.fire('suggest-query', {
-      query: localTarget.query,
-      originalQuery: this.$.input.value,
-      position: localTarget.position,
-      suggestionType: localTarget.suggestionType
-    });
+    // Handles query suggestions.
+    if (localTarget.suggestionCategory == 1) {
+      this.fire('gpm-suggest-query', {
+        query: localTarget.query,
+        originalQuery: this.$.input.value,
+        position: localTarget.position,
+        suggestionType: localTarget.suggestionType
+      });
+    }
   },
 
   /**
@@ -24663,6 +25847,13 @@ Polymer({
    * @private
    */
   querySelected_: function(event) {
+    if (event.detail.keyboardEvent.shiftKey) {
+      if (this.currentlySelected_.suggestionCategory == 2) {
+        this.currentlySelected_.playEntity();
+      }
+      return;
+    }
+
     if (event.detail.keyboardEvent.target == this.$.clearButton) {
       return;
     }
@@ -24671,7 +25862,7 @@ Polymer({
       this.handleSuggestion_(this.currentlySelected_);
     } else {
       var query = this.$.input.value.trim();
-      this.fire('query', {query: query});
+      this.fire('gpm-query', {query: query});
     }
   },
 
@@ -24682,11 +25873,9 @@ Polymer({
    */
   handleSuggestion_: function(suggestion) {
     if (suggestion.suggestionCategory == 2) {  // Entity suggestion.
-      this.fire('navigate-to-entity', {
-        entity: suggestion
-      });
+      suggestion.navigateToEntity();
     } else {  // Query suggestion.
-      this.fire('suggest-query', {
+      this.fire('gpm-suggest-query', {
         query: suggestion.query,
         originalQuery: this.$.input.value,
         position: suggestion.position,
@@ -24770,6 +25959,15 @@ Polymer({
   },
 
   /**
+   * Handles clicks on the clear button.
+   * @private
+   */
+  onClearButtonClick_: function() {
+    this.clear();
+    this.$.input.focus();
+  },
+
+  /**
    * Opens the search box.
    */
   open: function() {
@@ -24791,7 +25989,7 @@ Polymer({
    */
   close: function() {
     this.opened = false;
-    this.$.suggestContainer.style.height = '0px';
+    this.$.suggestionList.style.height = '0px';
     this.$.input.blur();
     this.$.input.removeAttribute('aria-expanded');
     this.clearSelected_();
@@ -24802,7 +26000,6 @@ Polymer({
    */
   clear: function() {
     this.$.input.value = '';
-    this.$.input.focus();
 
     var inputEvent;
     try {
@@ -24816,5 +26013,4 @@ Polymer({
     this.$.input.dispatchEvent(inputEvent);
     this.clearSelected_();
   },
-
 });
