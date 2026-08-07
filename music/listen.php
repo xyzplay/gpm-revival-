@@ -2,40 +2,6 @@
 <html lang="en-US">
 
 <head>
-<script>
-(function(){
-    // Intercept fetch/XHR to /log and /services endpoints
-    const origFetch = window.fetch;
-    window.fetch = function(url, opts){
-        console.log("GPM fetch:", url, opts);
-        return origFetch.apply(this, arguments);
-    };
-
-    const origXHROpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url, async){
-        this.addEventListener('load', function(){
-            console.log("XHR loaded:", url, this.status, this.response);
-        });
-        console.log("XHR open:", method, url);
-        return origXHROpen.apply(this, arguments);
-    };
-})();
-</script>
-<script>
-window.onerror = (msg, src, line, col, err) => {
-  const log = document.createElement('div');
-  log.innerText = "JS ERROR: " + msg + " @ " + line + ":" + col;
-  log.style.position = 'fixed';
-  log.style.bottom = '0';
-  log.style.left = '0';
-  log.style.background = 'red';
-  log.style.color = 'white';
-  log.style.padding = '10px';
-  log.style.zIndex = '999999';
-  document.body.appendChild(log);
-};
-</script>
-
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta http-equiv="content-type" content="text/html; charset=UTF-8">
   <meta name="google-site-verification" content="DurDLKfokvWz3G88a8QSeVnoObqnCJTjlOj7Zad-oSg" />
