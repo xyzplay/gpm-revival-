@@ -19,7 +19,6 @@ Revives GPM Web &amp; App
 - Radio stations
 - Browse stations
 - Search
-- Pictures loading
 - Saving Settings
 - Login
 - Multi Download
@@ -27,3 +26,6 @@ Revives GPM Web &amp; App
 - New releases
 - Top charts genres
 - Subscribing to Podcasts
+
+# Not working
+- Pictures loading
